@@ -1,0 +1,243 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Pesos Pro - 2026</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+    <header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 style="font-size: 22px; font-weight: 800;">Registro Operativo</h2>
+            <i data-lucide="user-circle" style="width: 28px; height: 28px;"></i>
+        </div>
+
+        <div class="meta-shell meta-accordion" id="meta-accordion">
+            <button type="button" class="meta-accordion-trigger" id="meta-accordion-trigger" aria-expanded="false" aria-controls="meta-accordion-panel">
+                <div class="meta-preview">
+                    <span class="meta-preview-kicker">Turno</span>
+                    <div class="meta-preview-row">
+                        <span class="meta-preview-pill meta-preview-pill--empty" id="preview-variedad">Variedad</span>
+                        <span class="meta-preview-pill meta-preview-pill--traz meta-preview-pill--empty" id="preview-traz">Trazabilidad</span>
+                    </div>
+                </div>
+                <span class="meta-accordion-chevron" aria-hidden="true"><i data-lucide="chevron-down"></i></span>
+            </button>
+
+            <div class="meta-accordion-body" id="meta-accordion-panel" role="region" aria-labelledby="meta-accordion-trigger" aria-hidden="true">
+                <div class="meta-accordion-inner">
+                    <form id="form-operativo-meta" autocomplete="on" aria-label="Datos del turno">
+                        <div class="meta-sheet-top">
+                            <div>
+                                <p class="meta-kicker">Detalle</p>
+                                <h3 class="meta-sheet-title">Completar registro</h3>
+                            </div>
+                            <div class="meta-progress-wrap">
+                                <div class="meta-progress-label">
+                                    <span>Listo</span>
+                                    <span id="meta-progress-text">0 / 6</span>
+                                </div>
+                                <div class="meta-progress-track" aria-hidden="true">
+                                    <div class="meta-progress-fill" id="meta-progress-fill"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <input type="hidden" id="meta-variedad" name="variedad" value="">
+                        <input type="hidden" id="meta-trazabilidad" name="trazabilidad" value="">
+                        <input type="hidden" id="meta-rotulo" name="rotulo" value="">
+                        <input type="hidden" id="meta-dias-preco" name="diasPreco" value="">
+                        <input type="hidden" id="meta-num-cosecha" name="numCosecha" value="">
+
+                        <div class="meta-block">
+                            <span class="meta-block-title">Variedad</span>
+                            <div class="chip-scroll" data-chip-group data-target="meta-variedad" role="group" aria-label="Variedad">
+                                <button type="button" class="meta-chip" data-value="Júpiter">Júpiter</button>
+                                <button type="button" class="meta-chip" data-value="Sweet Celebration">Sweet Celebration</button>
+                                <button type="button" class="meta-chip" data-value="Legacy">Legacy</button>
+                            </div>
+                        </div>
+
+                        <div class="meta-block">
+                            <span class="meta-block-title">Trazabilidad</span>
+                            <div class="chip-scroll" data-chip-group data-target="meta-trazabilidad" role="group" aria-label="Trazabilidad">
+                                <button type="button" class="meta-chip" data-value="E4-C5-T3A · Acopio 1">E4-C5-T3A · Acopio 1</button>
+                                <button type="button" class="meta-chip" data-value="E4-C5-T3B · Acopio 2">E4-C5-T3B · Acopio 2</button>
+                                <button type="button" class="meta-chip" data-value="E4-C6-T2A · Acopio 1">E4-C6-T2A · Acopio 1</button>
+                            </div>
+                        </div>
+
+                        <div class="meta-block">
+                            <span class="meta-block-title">Rótulo de muestra</span>
+                            <div class="chip-scroll" data-chip-group data-target="meta-rotulo" role="group" aria-label="Rótulo">
+                                <button type="button" class="meta-chip" data-value="Ensayo 1">Ensayo 1</button>
+                                <button type="button" class="meta-chip" data-value="Ensayo 2">Ensayo 2</button>
+                                <button type="button" class="meta-chip" data-value="QC">QC</button>
+                            </div>
+                        </div>
+
+                        <div class="meta-block">
+                            <span class="meta-block-title">Precosecha / cosecha</span>
+                            <div class="chip-scroll" data-chip-group-pair data-target-dias="meta-dias-preco" data-target-cose="meta-num-cosecha" role="group" aria-label="Días y número de cosecha">
+                                <button type="button" class="meta-chip" data-dias="7" data-cose="10">7 · 10</button>
+                                <button type="button" class="meta-chip" data-dias="10" data-cose="12">10 · 12</button>
+                                <button type="button" class="meta-chip" data-dias="14" data-cose="15">14 · 15</button>
+                            </div>
+                        </div>
+
+                        <div class="meta-block">
+                            <div class="meta-row-2">
+                                <div>
+                                    <label class="meta-block-title" for="meta-responsable" style="margin-bottom: 8px;">Responsable</label>
+                                    <input class="meta-inp" id="meta-responsable" name="responsable" type="text" enterkeyhint="next" placeholder="Nombre" autocomplete="name">
+                                </div>
+                                <div>
+                                    <span class="meta-block-title" style="display:block;margin-bottom:8px;">Hora inicio</span>
+                                    <div class="meta-time-row">
+                                        <input class="meta-inp" id="meta-hora" name="hora" type="time" enterkeyhint="done">
+                                        <button type="button" class="meta-btn-ahora" id="meta-btn-ahora" title="Usar hora actual">
+                                            <i data-lucide="clock-3"></i>
+                                            Ahora
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <details class="llenado-jarras-wrapper" open>
+            <summary class="llenado-jarras-wrapper-summary">
+                <div class="control-equitativo-label">
+                    <b>Tiempo de llenado de jarras (hora)</b>
+                    <span>Tabla por ensayo: jarra, tipo (cosecha/trasvasado), inicio, término y total</span>
+                </div>
+                <span class="llenado-jarras-toggle-icon" aria-hidden="true"></span>
+            </summary>
+            <div class="llenado-jarras-panel" id="llenado-jarras-panel-body"></div>
+        </details>
+
+        <div class="control-equitativo-bar">
+            <div class="control-equitativo-label">
+                <b>Control equitativo</b>
+                <span>Temperatura y humedad para todos los clamshell</span>
+            </div>
+            <div class="control-equitativo-actions">
+                <button type="button" class="control-equitativo-btn" onclick="abrirModalControlGlobal('temperatura')" title="Temperatura global">
+                    <i data-lucide="thermometer"></i>
+                </button>
+                <button type="button" class="control-equitativo-btn" onclick="abrirModalControlGlobal('humedad')" title="Humedad global">
+                    <i data-lucide="droplets"></i>
+                </button>
+            </div>
+        </div>
+        <div id="cards-container"></div>
+    </div>
+
+    <div class="fab-menu" id="fab-menu">
+        <div class="fab-menu-actions">
+            <button class="fab-mini" onclick="abrirModalResumenGlobal()" aria-label="Resumen despacho acopio-campo">
+                <i data-lucide="truck"></i>
+            </button>
+            <button class="fab" onclick="abrirModal('Nuevo Registro')" aria-label="Nuevo registro">
+                <svg class="fab-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14"></path>
+                </svg>
+            </button>
+        </div>
+        <button class="fab-options" id="fab-options-btn" type="button" aria-label="Opciones rápidas" aria-expanded="false">
+            <i data-lucide="ellipsis"></i>
+        </button>
+    </div>
+
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal-content">
+            <h2 id="modal-title" style="margin-bottom: 20px; color: var(--primary);">Editar Datos</h2>
+            <div class="form-group"><label>PESO 1 (g)</label><input type="number" id="m-p1" step="0.1"></div>
+            <div class="form-group"><label>PESO 2 (g)</label><input type="number" id="m-p2" step="0.1"></div>
+            <div class="form-group"><label>LLEGADA ACOPIO (g)</label><input type="number" id="m-acopio" step="0.1"></div>
+            <div class="form-group"><label>DESPACHO ACOPIO (g)</label><input type="number" id="m-despacho" step="0.1"></div>
+            <button class="btn-save" onclick="guardarModalTarjeta()">GUARDAR REGISTRO</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="metric-modal-overlay">
+        <div class="modal-content">
+            <h2 id="metric-modal-title" style="margin-bottom: 16px; color: var(--primary);">Detalle de medición</h2>
+            <div class="metric-modal-body" id="metric-modal-body"></div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" onclick="cerrarModalMetrica()">Cancelar</button>
+                <button class="btn-save" type="button" onclick="guardarModalMetrica()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="observation-modal-overlay">
+        <div class="modal-content">
+            <h2 id="observation-modal-title" style="margin-bottom: 16px; color: var(--primary);">Observación</h2>
+            <div class="form-group">
+                <label>OBSERVACIÓN DEL CLAMSHELL</label>
+                <input type="text" id="observation-input" placeholder="Opcional: incidencia, comentario, condición de campo">
+            </div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" onclick="cerrarModalObservacion()">Cancelar</button>
+                <button class="btn-save" type="button" onclick="guardarModalObservacion()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="essential-modal-overlay">
+        <div class="modal-content">
+            <h2 id="essential-modal-title" style="margin-bottom: 16px; color: var(--primary);">Resumen esencial</h2>
+            <div class="metric-modal-body" id="essential-modal-body"></div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" onclick="cerrarModalResumen()">Cancelar</button>
+                <button class="btn-save" type="button" onclick="guardarModalResumenGlobal()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="control-global-modal-overlay">
+        <div class="modal-content">
+            <h2 id="control-global-modal-title" style="margin-bottom: 16px; color: var(--primary);">Control equitativo</h2>
+            <div class="metric-modal-body" id="control-global-modal-body"></div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" onclick="cerrarModalControlGlobal()">Cancelar</button>
+                <button class="btn-save" type="button" onclick="guardarModalControlGlobal()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="llenado-horas-modal-overlay">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 16px; color: var(--primary);">Editar horas</h2>
+            <div class="form-group"><label>Inicio</label><input type="time" id="lhm-inicio"></div>
+            <div class="form-group"><label>Final</label><input type="time" id="lhm-termino"></div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" onclick="cerrarModalHorasLlenado()">Cancelar</button>
+                <button class="btn-save" type="button" onclick="guardarModalHorasLlenado()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <nav>
+        <i data-lucide="house" class="nav-btn active"></i>
+        <i data-lucide="scan-line" class="nav-btn"></i>
+        <i data-lucide="pie-chart" class="nav-btn"></i>
+        <i data-lucide="settings" class="nav-btn"></i>
+    </nav>
+
+    <script src="./librerias/lucide.min.js"></script>
+    <script src="./librerias/sweetalert2.all.min.js"></script>
+    <script src="./app.js"></script>
+</body>
+</html>
+
+
+
