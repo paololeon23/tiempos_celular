@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Packing</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <div class="container" style="padding-top: 24px; padding-bottom: 100px;">
+        <h2 style="margin-bottom: 8px;">Packing</h2>
+        <p style="color: #64748B;">Sección separada de Campo.</p>
+    </div>
+
+    <nav id="main-bottom-nav">
+        <a class="nav-btn nav-link" id="nav-campo" data-nav-index="0" href="../" aria-label="Campo">
+            <i data-lucide="house"></i>
+            <span>Campo</span>
+        </a>
+        <a class="nav-btn nav-link active" id="nav-packing" data-nav-index="1" href="./" aria-label="Packing">
+            <i data-lucide="scan-line"></i>
+            <span>Packing</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-historial" data-nav-index="2" href="../historial/" aria-label="Historial">
+            <i data-lucide="clock-3"></i>
+            <span>Historial</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-recomendaciones" data-nav-index="3" href="../recomendaciones/" aria-label="Recomendaciones">
+            <i data-lucide="settings"></i>
+            <span>Recomendaciones</span>
+        </a>
+    </nav>
+
+    <script src="../librerias/lucide.min.js"></script>
+    <script>
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            window.lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

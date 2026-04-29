@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historial</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+        .hist-wrap { padding-top: 18px; padding-bottom: 110px; }
+        .hist-kpi { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 14px; }
+        .hist-kpi-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; }
+        .hist-kpi-card b { display: block; font-size: 20px; color: #0f172a; }
+        .hist-kpi-card span { color: #64748b; font-size: 12px; }
+        .hist-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; margin-bottom: 10px; }
+        .hist-title { font-size: 14px; font-weight: 800; margin: 0 0 8px; color: #0f172a; }
+        .hist-list { display: flex; flex-direction: column; gap: 8px; }
+        .hist-row { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .hist-row-main { font-size: 13px; color: #0f172a; font-weight: 700; }
+        .hist-row-sub { font-size: 11px; color: #64748b; }
+        .hist-pill { font-size: 11px; font-weight: 800; border-radius: 999px; padding: 3px 8px; }
+        .hist-pill-ok { background: #dcfce7; color: #166534; }
+        .hist-pill-pend { background: #fef3c7; color: #92400e; }
+        .hist-pill-stop { background: #fee2e2; color: #991b1b; }
+        .hist-empty { font-size: 12px; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container hist-wrap">
+        <h2 style="margin-bottom: 6px;">Historial</h2>
+        <p style="color: #64748B; margin-bottom: 8px;">Registros del sistema y estado de sincronización local.</p>
+
+        <section class="hist-kpi">
+            <article class="hist-kpi-card"><b id="kpi-servidor">0</b><span>Registrados en servidor</span></article>
+            <article class="hist-kpi-card"><b id="kpi-pendientes">0</b><span>Pendientes por internet</span></article>
+            <article class="hist-kpi-card"><b id="kpi-bloqueados">0</b><span>Duplicados / bloqueados</span></article>
+        </section>
+
+        <section class="hist-section">
+            <h3 class="hist-title">Servidor (GET code.gs)</h3>
+            <div id="server-list" class="hist-list"></div>
+        </section>
+
+        <section class="hist-section">
+            <h3 class="hist-title">Sincronización local</h3>
+            <div id="local-list" class="hist-list"></div>
+        </section>
+    </div>
+
+    <nav id="main-bottom-nav">
+        <a class="nav-btn nav-link" id="nav-campo" data-nav-index="0" href="../" aria-label="Campo">
+            <i data-lucide="house"></i>
+            <span>Campo</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-packing" data-nav-index="1" href="../packing/" aria-label="Packing">
+            <i data-lucide="scan-line"></i>
+            <span>Packing</span>
+        </a>
+        <a class="nav-btn nav-link active" id="nav-historial" data-nav-index="2" href="./" aria-label="Historial">
+            <i data-lucide="clock-3"></i>
+            <span>Historial</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-recomendaciones" data-nav-index="3" href="../recomendaciones/" aria-label="Recomendaciones">
+            <i data-lucide="settings"></i>
+            <span>Recomendaciones</span>
+        </a>
+    </nav>
+
+    <script src="../librerias/lucide.min.js"></script>
+    <script src="../librerias/sweetalert2.all.min.js"></script>
+    <script>
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            window.lucide.createIcons();
+        }
+
+        const API_URL = 'https://script.google.com/macros/s/AKfycbwdC1lwuGNT01xfLE_0jI31oXU13rBinYPKwlVfkZwqmIJGqSRuvPnq4-A9b6tHZThN/exec';
+        const SYNC_QUEUE_KEY = 'tiempos-sync-queue-v1';
+        const SYNC_HISTORY_KEY = 'tiempos-sync-history-v1';
+
+        function cbJsonp(urlBase, params) {
+            return new Promise((resolve, reject) => {
+                const cb = '__hist_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                const noopCb = function () { };
+                const qs = new URLSearchParams(params || {});
+                qs.set('callback', cb);
+                const src = urlBase + (urlBase.includes('?') ? '&' : '?') + qs.toString();
+                const script = document.createElement('script');
+                let done = false;
+                const timeoutId = setTimeout(() => {
+                    if (done) return;
+                    done = true;
+                    window[cb] = noopCb;
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                    reject(new Error('Timeout JSONP'));
+                }, 12000);
+                window[cb] = (payload) => {
+                    if (done) return;
+                    done = true;
+                    clearTimeout(timeoutId);
+                    window[cb] = noopCb;
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                    resolve(payload);
+                };
+                script.onerror = () => {
+                    if (done) return;
+                    done = true;
+                    clearTimeout(timeoutId);
+                    window[cb] = noopCb;
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                    reject(new Error('Error JSONP'));
+                };
+                script.src = src;
+                document.body.appendChild(script);
+            });
+        }
+
+        function readJsonLs(key) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) return [];
+                const arr = JSON.parse(raw);
+                return Array.isArray(arr) ? arr : [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        function pillForEstado(e) {
+            const x = String(e || '').toLowerCase();
+            if (x === 'subido') return '<span class="hist-pill hist-pill-ok">subido</span>';
+            if (x === 'pendiente') return '<span class="hist-pill hist-pill-pend">pendiente</span>';
+            return '<span class="hist-pill hist-pill-stop">' + (x || 'otro') + '</span>';
+        }
+
+        function renderServer(registrados) {
+            const box = document.getElementById('server-list');
+            const list = Array.isArray(registrados) ? registrados.slice(0) : [];
+            const grouped = {};
+            list.forEach((r) => {
+                const fecha = String(r?.fecha || '').trim();
+                const num = String(r?.num_muestra || '').trim();
+                if (!fecha || !num) return;
+                const key = fecha + '||' + num;
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        fecha: fecha,
+                        num_muestra: num,
+                        total: 0,
+                        ensayos: new Set()
+                    };
+                }
+                grouped[key].total += 1;
+                const en = String(r?.ensayo_numero || '').trim();
+                if (en) grouped[key].ensayos.add(en);
+            });
+            const view = Object.values(grouped).map((g) => ({
+                fecha: g.fecha,
+                num_muestra: g.num_muestra,
+                total: g.total,
+                ensayos: [...g.ensayos].sort((a, b) => Number(a) - Number(b))
+            })).sort((a, b) => {
+                const f = String(b.fecha || '').localeCompare(String(a.fecha || ''));
+                if (f !== 0) return f;
+                return String(a.num_muestra || '').localeCompare(String(b.num_muestra || ''));
+            });
+
+            document.getElementById('kpi-servidor').textContent = String(view.length);
+            if (!view.length) {
+                box.innerHTML = '<div class="hist-empty">Sin registros devueltos por GET.</div>';
+                return;
+            }
+            box.innerHTML = view.slice(0, 160).map((r, idx) => `
+                <div class="hist-row">
+                    <div>
+                        <div class="hist-row-main">#${idx + 1} · Fecha: ${r.fecha || '--'} · N° muestra: ${r.num_muestra || '--'}</div>
+                        <div class="hist-row-sub">Total filas: ${r.total} · Ensayo(s): ${r.ensayos.length ? r.ensayos.join(', ') : '--'}</div>
+                    </div>
+                    <span class="hist-pill hist-pill-ok">registrado</span>
+                </div>
+            `).join('');
+        }
+
+        function renderLocal() {
+            const queue = readJsonLs(SYNC_QUEUE_KEY);
+            const hist = readJsonLs(SYNC_HISTORY_KEY);
+            const byUid = {};
+            hist.forEach((h) => { if (h && h.uid) byUid[h.uid] = h; });
+            const rows = queue.map((q) => {
+                const events = hist.filter((h) => h && h.uid && q && q.uid && h.uid === q.uid);
+                const last = events.length ? events[events.length - 1] : (q && q.uid ? byUid[q.uid] : null);
+                return {
+                    uid: q?.uid || '',
+                    fecha: q?.fecha || '',
+                    ensayo: q?.ensayo || '',
+                    num_muestra: q?.num_muestra || '',
+                    estado: (last?.estado || q?.estado || '').toLowerCase(),
+                    error: last?.error || q?.error || '',
+                    intentos: Number(last?.intentos || q?.intentos || 0),
+                    ts: Number(last?.ts || q?.actualizado_en || q?.creado_en || 0)
+                };
+            });
+            const pendientes = rows.filter((r) => r.estado === 'pendiente').length;
+            const bloqueados = rows.filter((r) => r.estado && r.estado !== 'pendiente' && r.estado !== 'subido').length;
+            document.getElementById('kpi-pendientes').textContent = String(pendientes);
+            document.getElementById('kpi-bloqueados').textContent = String(bloqueados);
+
+            const box = document.getElementById('local-list');
+            if (!rows.length) {
+                box.innerHTML = '<div class="hist-empty">Sin elementos en cola local.</div>';
+                return;
+            }
+            const ordenados = rows.slice(0).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+            box.innerHTML = ordenados.slice(0, 120).map((r, idx) => `
+                <div class="hist-row">
+                    <div>
+                        <div class="hist-row-main">#${idx + 1} · ${r.ensayo || 'Ensayo'} · N° muestra: ${r.num_muestra || '--'}</div>
+                        <div class="hist-row-sub">${r.fecha || '--'} · intentos: ${r.intentos}${r.error ? ' · motivo: ' + r.error : ''}</div>
+                    </div>
+                    ${pillForEstado(r.estado)}
+                </div>
+            `).join('');
+        }
+
+        async function initHistorial() {
+            renderLocal();
+            try {
+                const r = await cbJsonp(API_URL, { listado_registrados: '1' });
+                if (!r || r.ok !== true) throw new Error('Respuesta inválida');
+                renderServer(r.registrados || []);
+            } catch (_) {
+                document.getElementById('server-list').innerHTML = '<div class="hist-empty">No se pudo consultar servidor en este momento.</div>';
+            }
+        }
+
+        initHistorial();
+    </script>
+</body>
+</html>

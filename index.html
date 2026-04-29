@@ -4,23 +4,45 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Pesos Pro - 2026</title>
+    <link rel="icon" href="data:,">
+    <link rel="manifest" href="./manifest.json">
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
     <header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2 style="font-size: 22px; font-weight: 800;">Registro Operativo</h2>
-            <i data-lucide="user-circle" style="width: 28px; height: 28px;"></i>
+        <div class="header-top-row">
+            <h2 class="header-title">
+                <span class="header-title-prefix">Registro:</span>
+                <select id="header-tipo-registro" class="header-tipo-select" name="tipoRegistro" aria-label="Visual o Acopio">
+                    <option value="visual">Visual</option>
+                    <option value="acopio">Acopio</option>
+                </select>
+            </h2>
+            <div class="header-status-card is-online" id="header-status-card" aria-live="polite" aria-label="Pendientes y conexión">
+                <div class="header-status-ring" aria-hidden="true">
+                    <span class="header-status-ring-inner">
+                        <i data-lucide="wifi" class="header-status-wifi" id="header-status-wifi"></i>
+                    </span>
+                </div>
+                <div class="header-status-body">
+                    <div class="header-status-pend">Pendientes: <span class="header-status-pend-num" id="header-pendientes-count">00</span></div>
+                    <div class="header-status-conn">
+                        <span class="header-status-conn-dot" aria-hidden="true"></span>
+                        <span class="header-status-conn-text" id="header-conn-label">En línea</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="meta-shell meta-accordion" id="meta-accordion">
             <button type="button" class="meta-accordion-trigger" id="meta-accordion-trigger" aria-expanded="false" aria-controls="meta-accordion-panel">
                 <div class="meta-preview">
-                    <span class="meta-preview-kicker">Turno</span>
+                    <span class="meta-preview-kicker">Se va a tomar las mediciones:</span>
                     <div class="meta-preview-row">
-                        <span class="meta-preview-pill meta-preview-pill--empty" id="preview-variedad">Variedad</span>
-                        <span class="meta-preview-pill meta-preview-pill--traz meta-preview-pill--empty" id="preview-traz">Trazabilidad</span>
+                        <span class="meta-preview-pill meta-preview-pill--empty" id="preview-num">--</span>
+                        <span class="meta-preview-pill meta-preview-pill--empty" id="preview-muestra">--</span>
+                        <span class="meta-preview-pill meta-preview-pill--traz meta-preview-pill--empty" id="preview-traz">--</span>
                     </div>
                 </div>
                 <span class="meta-accordion-chevron" aria-hidden="true"><i data-lucide="chevron-down"></i></span>
@@ -45,65 +67,103 @@
                             </div>
                         </div>
 
-                        <input type="hidden" id="meta-variedad" name="variedad" value="">
-                        <input type="hidden" id="meta-trazabilidad" name="trazabilidad" value="">
-                        <input type="hidden" id="meta-rotulo" name="rotulo" value="">
-                        <input type="hidden" id="meta-dias-preco" name="diasPreco" value="">
-                        <input type="hidden" id="meta-num-cosecha" name="numCosecha" value="">
+                        <input type="hidden" id="visual-rotulo" name="rotulo" value="">
 
                         <div class="meta-block">
-                            <span class="meta-block-title">Variedad</span>
-                            <div class="chip-scroll" data-chip-group data-target="meta-variedad" role="group" aria-label="Variedad">
-                                <button type="button" class="meta-chip" data-value="Júpiter">Júpiter</button>
-                                <button type="button" class="meta-chip" data-value="Sweet Celebration">Sweet Celebration</button>
-                                <button type="button" class="meta-chip" data-value="Legacy">Legacy</button>
-                            </div>
-                        </div>
-
-                        <div class="meta-block">
-                            <span class="meta-block-title">Trazabilidad</span>
-                            <div class="chip-scroll" data-chip-group data-target="meta-trazabilidad" role="group" aria-label="Trazabilidad">
-                                <button type="button" class="meta-chip" data-value="E4-C5-T3A · Acopio 1">E4-C5-T3A · Acopio 1</button>
-                                <button type="button" class="meta-chip" data-value="E4-C5-T3B · Acopio 2">E4-C5-T3B · Acopio 2</button>
-                                <button type="button" class="meta-chip" data-value="E4-C6-T2A · Acopio 1">E4-C6-T2A · Acopio 1</button>
-                            </div>
-                        </div>
-
-                        <div class="meta-block">
-                            <span class="meta-block-title">Rótulo de muestra</span>
-                            <div class="chip-scroll" data-chip-group data-target="meta-rotulo" role="group" aria-label="Rótulo">
-                                <button type="button" class="meta-chip" data-value="Ensayo 1">Ensayo 1</button>
-                                <button type="button" class="meta-chip" data-value="Ensayo 2">Ensayo 2</button>
-                                <button type="button" class="meta-chip" data-value="QC">QC</button>
-                            </div>
-                        </div>
-
-                        <div class="meta-block">
-                            <span class="meta-block-title">Precosecha / cosecha</span>
-                            <div class="chip-scroll" data-chip-group-pair data-target-dias="meta-dias-preco" data-target-cose="meta-num-cosecha" role="group" aria-label="Días y número de cosecha">
-                                <button type="button" class="meta-chip" data-dias="7" data-cose="10">7 · 10</button>
-                                <button type="button" class="meta-chip" data-dias="10" data-cose="12">10 · 12</button>
-                                <button type="button" class="meta-chip" data-dias="14" data-cose="15">14 · 15</button>
+                            <div class="meta-row-2 meta-row-2--muestra">
+                                <div>
+                                    <label class="meta-block-title" for="visual-meta-muestra" style="margin-bottom: 8px;">Muestra</label>
+                                    <select class="meta-inp" id="visual-meta-muestra" name="muestra">
+                                        <option value="">Seleccionar muestra</option>
+                                        <option value="Ensayo 1">Muestra 1</option>
+                                        <option value="Ensayo 2">Muestra 2</option>
+                                        <option value="Ensayo 3">Muestra 3</option>
+                                        <option value="Ensayo 4">Muestra 4</option>
+                                        <option value="Ensayo 5">Muestra 5</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="meta-block-title" for="visual-num-muestra" style="margin-bottom: 8px;">N° muestra</label>
+                                    <input class="meta-inp" id="visual-num-muestra" name="numMuestra" type="text" maxlength="4" placeholder="Ej. 001">
+                                </div>
                             </div>
                         </div>
 
                         <div class="meta-block">
                             <div class="meta-row-2">
                                 <div>
-                                    <label class="meta-block-title" for="meta-responsable" style="margin-bottom: 8px;">Responsable</label>
-                                    <input class="meta-inp" id="meta-responsable" name="responsable" type="text" enterkeyhint="next" placeholder="Nombre" autocomplete="name">
+                                    <label class="meta-block-title" for="visual-responsable" style="margin-bottom: 8px;">Responsable</label>
+                                    <input class="meta-inp" id="visual-responsable" name="responsable" type="text" placeholder="Nombre">
                                 </div>
                                 <div>
-                                    <span class="meta-block-title" style="display:block;margin-bottom:8px;">Hora inicio</span>
-                                    <div class="meta-time-row">
-                                        <input class="meta-inp" id="meta-hora" name="hora" type="time" enterkeyhint="done">
-                                        <button type="button" class="meta-btn-ahora" id="meta-btn-ahora" title="Usar hora actual">
-                                            <i data-lucide="clock-3"></i>
-                                            Ahora
-                                        </button>
-                                    </div>
+                                    <label class="meta-block-title" for="visual-guia-precosecha" style="margin-bottom: 8px;">Días de precosecha / N° de cosecha</label>
+                                    <input class="meta-inp" id="visual-guia-precosecha" name="guiaPrecosecha" type="text" placeholder="Ej. 5 / 12" inputmode="text" autocomplete="off" aria-label="Días de precosecha y número de cosecha">
                                 </div>
                             </div>
+                        </div>
+
+                        <div class="meta-block">
+                            <span class="meta-block-title" style="display:block;margin-bottom:8px;">Hora inicio</span>
+                            <div class="meta-time-row">
+                                <input class="meta-inp" id="visual-hora" name="hora" type="time" enterkeyhint="done">
+                                <button type="button" class="meta-btn-ahora" id="meta-btn-ahora" title="Iniciar ahora">
+                                    <i data-lucide="clock-3"></i>
+                                    Iniciar
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="meta-block">
+                            <label class="meta-block-title" for="visual-meta-fundo" style="margin-bottom: 8px;">Fundo</label>
+                            <select class="meta-inp" id="visual-meta-fundo" name="fundo">
+                                <option value="">Seleccionar</option>
+                                <option value="LN">LN</option>
+                                <option value="C5">C5</option>
+                                <option value="C6">C6</option>
+                                <option value="LN-2">LN</option>
+                            </select>
+                        </div>
+
+                        <div class="meta-block">
+                            <span class="meta-block-title" style="display:block;margin-bottom:8px;">Trazabilidad</span>
+                            <div class="meta-row-3">
+                                <select class="meta-inp" id="visual-traz-etapa" name="trazEtapa">
+                                    <option value="">Etapa</option>
+                                    <option value="E1">E1</option>
+                                    <option value="E2">E2</option>
+                                    <option value="E3">E3</option>
+                                    <option value="E4">E4</option>
+                                    <option value="E5">E5</option>
+                                    <option value="E6">E6</option>
+                                    <option value="E7">E7</option>
+                                    <option value="E8">E8</option>
+                                    <option value="E9">E9</option>
+                                </select>
+                                <select class="meta-inp" id="visual-traz-campo" name="trazCampo">
+                                    <option value="">Campo</option>
+                                    <option value="C1">C1</option>
+                                    <option value="C2">C2</option>
+                                    <option value="C3">C3</option>
+                                    <option value="C4">C4</option>
+                                    <option value="C5">C5</option>
+                                    <option value="C6">C6</option>
+                                    <option value="C7">C7</option>
+                                    <option value="C8">C8</option>
+                                    <option value="C9">C9</option>
+                                </select>
+                                <input class="meta-inp" id="visual-traz-turno" name="trazTurno" type="text" placeholder="Turno" autocomplete="off">
+                            </div>
+                            <input type="hidden" id="visual-trazabilidad" name="trazabilidad" value="">
+                        </div>
+
+                        <div class="meta-block">
+                            <label class="meta-block-title" for="visual-meta-variedad" style="margin-bottom: 8px;">Variedad</label>
+                            <select class="meta-inp" id="visual-meta-variedad" name="variedad">
+                                <option value="">Seleccionar</option>
+                                <option value="Júpiter">Júpiter</option>
+                                <option value="Sweet Celebration">Sweet Celebration</option>
+                                <option value="Legacy">Legacy</option>
+                            </select>
                         </div>
                     </form>
                 </div>
@@ -138,10 +198,44 @@
             </div>
         </div>
         <div id="cards-container"></div>
+
+        <details class="logistica-acopio-block" aria-label="Despacho acopio: guía y placa">
+            <summary class="logistica-acopio-head">
+                <div class="control-equitativo-btn logistica-acopio-icon-slot logistica-acopio-truck-wrap" title="Transporte" aria-hidden="true">
+                    <i data-lucide="truck"></i>
+                </div>
+                <div class="control-equitativo-label logistica-acopio-label">
+                    <b>Despacho acopio · campo</b>
+                    <span>Guía de remisión de acopio campo y placa del vehículo</span>
+                </div>
+                <span class="logistica-acopio-chev" aria-hidden="true"></span>
+            </summary>
+            <div class="logistica-acopio-body">
+                <div class="logistica-acopio-grid">
+                    <div class="logistica-acopio-field">
+                        <label class="meta-block-title" for="visual-guia-acopio">Guía de remisión de acopio campo</label>
+                        <input class="meta-inp" id="visual-guia-acopio" name="guiaRemisionAcopio" type="text" placeholder="Ej. 208353" autocomplete="off">
+                    </div>
+                    <div class="logistica-acopio-field">
+                        <label class="meta-block-title" for="visual-placa-vehiculo">Placa del vehículo</label>
+                        <input class="meta-inp" id="visual-placa-vehiculo" name="placaVehiculoAcopio" type="text" placeholder="Ej. 9967-OK" autocomplete="off">
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <div class="campo-envio-bar" id="campo-envio-bar" role="region" aria-label="Enviar registro al servidor">
+            <button type="button" class="btn-save btn-save-campo" id="btn-guardar-enviar-campo" onclick="guardarRegistroYEnviarDesdePantalla()">
+                Enviar registro
+            </button>
+        </div>
     </div>
 
     <div class="fab-menu" id="fab-menu">
         <div class="fab-menu-actions">
+            <button class="fab-mini fab-mini--danger" onclick="borrarTodoYCacheRapido()" aria-label="Eliminar todo y caché local">
+                <i data-lucide="trash-2"></i>
+            </button>
             <button class="fab-mini" onclick="abrirModalResumenGlobal()" aria-label="Resumen despacho acopio-campo">
                 <i data-lucide="truck"></i>
             </button>
@@ -151,6 +245,13 @@
                 </svg>
             </button>
         </div>
+        <div class="fecha-ring-widget fecha-ring-widget--fab" id="visual-fecha-ring-widget" aria-label="Fecha actual">
+            <div class="fecha-ring-circle" aria-hidden="true"></div>
+            <div class="fecha-ring-content">
+                <span class="fecha-ring-day" id="fecha-ring-day">--</span>
+                <span class="fecha-ring-month" id="fecha-ring-month">----</span>
+            </div>
+        </div>
         <button class="fab-options" id="fab-options-btn" type="button" aria-label="Opciones rápidas" aria-expanded="false">
             <i data-lucide="ellipsis"></i>
         </button>
@@ -158,12 +259,18 @@
 
     <div class="modal-overlay" id="modal-overlay">
         <div class="modal-content">
-            <h2 id="modal-title" style="margin-bottom: 20px; color: var(--primary);">Editar Datos</h2>
-            <div class="form-group"><label>PESO 1 (g)</label><input type="number" id="m-p1" step="0.1"></div>
-            <div class="form-group"><label>PESO 2 (g)</label><input type="number" id="m-p2" step="0.1"></div>
-            <div class="form-group"><label>LLEGADA ACOPIO (g)</label><input type="number" id="m-acopio" step="0.1"></div>
-            <div class="form-group"><label>DESPACHO ACOPIO (g)</label><input type="number" id="m-despacho" step="0.1"></div>
-            <button class="btn-save" onclick="guardarModalTarjeta()">GUARDAR REGISTRO</button>
+            <div class="modal-title-row" id="modal-title-row">
+                <h2 id="modal-title" style="margin-bottom: 0; color: var(--primary); margin-top: 8px;">Editar Datos</h2>
+                <div class="modal-jarra-box">
+                    <label for="visual-m-jarra">N° Jarra</label>
+                    <select id="visual-m-jarra" aria-label="Seleccionar N° de jarra"></select>
+                </div>
+            </div>
+            <div class="form-group"><label>PESO 1 (g)</label><input type="number" id="visual-p1" step="0.1"></div>
+            <div class="form-group"><label>PESO 2 (g)</label><input type="number" id="visual-p2" step="0.1"></div>
+            <div class="form-group"><label>LLEGADA ACOPIO (g)</label><input type="number" id="visual-acopio" step="0.1"></div>
+            <div class="form-group"><label>DESPACHO ACOPIO (g)</label><input type="number" id="visual-despacho" step="0.1"></div>
+            <button class="btn-save" id="btn-save-tarjeta" onclick="guardarModalTarjeta()">GUARDAR REGISTRO</button>
         </div>
     </div>
 
@@ -173,7 +280,7 @@
             <div class="metric-modal-body" id="metric-modal-body"></div>
             <div class="metric-modal-foot">
                 <button class="btn-secondary" type="button" onclick="cerrarModalMetrica()">Cancelar</button>
-                <button class="btn-save" type="button" onclick="guardarModalMetrica()">Guardar</button>
+                <button class="btn-save" id="btn-save-metrica" type="button" onclick="guardarModalMetrica()">Guardar</button>
             </div>
         </div>
     </div>
@@ -183,11 +290,11 @@
             <h2 id="observation-modal-title" style="margin-bottom: 16px; color: var(--primary);">Observación</h2>
             <div class="form-group">
                 <label>OBSERVACIÓN DEL CLAMSHELL</label>
-                <input type="text" id="observation-input" placeholder="Opcional: incidencia, comentario, condición de campo">
+                <input type="text" id="visual-observation" placeholder="Opcional: incidencia, comentario, condición de campo">
             </div>
             <div class="metric-modal-foot">
                 <button class="btn-secondary" type="button" onclick="cerrarModalObservacion()">Cancelar</button>
-                <button class="btn-save" type="button" onclick="guardarModalObservacion()">Guardar</button>
+                <button class="btn-save" id="btn-save-observacion" type="button" onclick="guardarModalObservacion()">Guardar</button>
             </div>
         </div>
     </div>
@@ -198,7 +305,7 @@
             <div class="metric-modal-body" id="essential-modal-body"></div>
             <div class="metric-modal-foot">
                 <button class="btn-secondary" type="button" onclick="cerrarModalResumen()">Cancelar</button>
-                <button class="btn-save" type="button" onclick="guardarModalResumenGlobal()">Guardar</button>
+                <button class="btn-save" id="btn-save-resumen-global" type="button" onclick="guardarModalResumenGlobal()">Guardar</button>
             </div>
         </div>
     </div>
@@ -209,7 +316,7 @@
             <div class="metric-modal-body" id="control-global-modal-body"></div>
             <div class="metric-modal-foot">
                 <button class="btn-secondary" type="button" onclick="cerrarModalControlGlobal()">Cancelar</button>
-                <button class="btn-save" type="button" onclick="guardarModalControlGlobal()">Guardar</button>
+                <button class="btn-save" id="btn-save-control-global" type="button" onclick="guardarModalControlGlobal()">Guardar</button>
             </div>
         </div>
     </div>
@@ -217,25 +324,39 @@
     <div class="modal-overlay" id="llenado-horas-modal-overlay">
         <div class="modal-content">
             <h2 style="margin-bottom: 16px; color: var(--primary);">Editar horas</h2>
-            <div class="form-group"><label>Inicio</label><input type="time" id="lhm-inicio"></div>
-            <div class="form-group"><label>Final</label><input type="time" id="lhm-termino"></div>
+            <div class="form-group"><label>Inicio</label><input type="time" id="visual-lhm-inicio"></div>
+            <div class="form-group"><label>Final</label><input type="time" id="visual-lhm-termino"></div>
             <div class="metric-modal-foot">
                 <button class="btn-secondary" type="button" onclick="cerrarModalHorasLlenado()">Cancelar</button>
-                <button class="btn-save" type="button" onclick="guardarModalHorasLlenado()">Guardar</button>
+                <button class="btn-save" id="btn-save-horas" type="button" onclick="guardarModalHorasLlenado()">Guardar</button>
             </div>
         </div>
     </div>
 
-    <nav>
-        <i data-lucide="house" class="nav-btn active"></i>
-        <i data-lucide="scan-line" class="nav-btn"></i>
-        <i data-lucide="pie-chart" class="nav-btn"></i>
-        <i data-lucide="settings" class="nav-btn"></i>
+    <nav id="main-bottom-nav">
+        <a class="nav-btn nav-link active" id="nav-campo" data-nav-index="0" href="./" aria-label="Campo">
+            <i data-lucide="house"></i>
+            <span>Campo</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-packing" data-nav-index="1" href="./packing/" aria-label="Packing">
+            <i data-lucide="scan-line"></i>
+            <span>Packing</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-historial" data-nav-index="2" href="./historial/" aria-label="Historial">
+            <i data-lucide="clock-3"></i>
+            <span>Historial</span>
+        </a>
+        <a class="nav-btn nav-link" id="nav-recomendaciones" data-nav-index="3" href="./recomendaciones/" aria-label="Recomendaciones">
+            <i data-lucide="settings"></i>
+            <span>Recomendaciones</span>
+        </a>
     </nav>
 
     <script src="./librerias/lucide.min.js"></script>
     <script src="./librerias/sweetalert2.all.min.js"></script>
-    <script src="./app.js"></script>
+    <script src="./app.js" charset="utf-8"></script>
+    <script src="./network.js"></script>
+    <script src="./script.js"></script>
 </body>
 </html>
 

@@ -1,0 +1,11 @@
+{
+  "name": "Tiempos Celular",
+  "short_name": "Tiempos",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F4F7FA",
+  "theme_color": "#164C7C",
+  "description": "Registro de tiempos y mediciones con soporte offline-first.",
+  "icons": []
+}
