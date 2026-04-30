@@ -1,4 +1,4 @@
-:root {
+﻿:root {
             --primary: rgb(22, 76, 124);
             --primary-dark: rgb(15, 50, 85);
             --accent: #FFB800;
@@ -521,6 +521,159 @@
         }
 
         .meta-inp::placeholder { color: #94A3B8; font-weight: 500; }
+
+        /* Flatpickr local: estilo uniforme (móvil + desktop) */
+        .flatpickr-calendar {
+            border: 1px solid #D8E3EE;
+            border-radius: 16px;
+            box-shadow: 0 16px 36px rgba(15, 50, 85, 0.24);
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+
+        .flatpickr-calendar.open {
+            animation: fp-fade-in 0.14s ease;
+        }
+
+        @keyframes fp-fade-in {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .flatpickr-months {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            border-radius: 16px 16px 0 0;
+            padding: 4px 0;
+        }
+
+        .flatpickr-current-month,
+        .flatpickr-monthDropdown-months,
+        .flatpickr-weekday,
+        .flatpickr-prev-month,
+        .flatpickr-next-month {
+            color: #fff !important;
+            fill: #fff !important;
+        }
+
+        .flatpickr-day {
+            border-radius: 10px;
+        }
+
+        .flatpickr-day.selected,
+        .flatpickr-day.startRange,
+        .flatpickr-day.endRange,
+        .flatpickr-day.selected:hover {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .flatpickr-day.today {
+            border-color: #7fb4e3;
+        }
+
+        .flatpickr-time {
+            border-top: 1px solid #E5EDF6;
+            padding: 10px 8px;
+            max-height: none;
+        }
+
+        .flatpickr-time .numInputWrapper {
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .flatpickr-time .flatpickr-time-separator {
+            color: #234b77;
+            font-weight: 700;
+            width: 14px;
+        }
+
+        .flatpickr-time input,
+        .flatpickr-time .flatpickr-am-pm {
+            font-weight: 700;
+            color: #163f69;
+        }
+
+        .flatpickr-time input:hover,
+        .flatpickr-time .flatpickr-am-pm:hover {
+            background: rgba(22, 76, 124, 0.08);
+        }
+
+        .flatpickr-calendar.noCalendar {
+            width: min(360px, 94vw);
+            min-width: 280px;
+            border-radius: 14px;
+        }
+
+        .flatpickr-calendar.noCalendar .flatpickr-time {
+            border-top: 0;
+            padding: 14px 12px;
+            height: auto;
+            gap: 10px;
+        }
+
+        .flatpickr-calendar.noCalendar .numInputWrapper {
+            background: #F4F8FC;
+            border: 1px solid #D8E3EE;
+            border-radius: 12px;
+            min-width: 92px;
+        }
+
+        .flatpickr-calendar.noCalendar .flatpickr-time input {
+            height: 48px;
+            font-size: 28px;
+            line-height: 48px;
+        }
+
+        .flatpickr-calendar.noCalendar .flatpickr-am-pm {
+            height: 48px;
+            line-height: 48px;
+            border-radius: 12px;
+            border: 1px solid #D8E3EE;
+            background: #F4F8FC;
+        }
+
+        /* Modal de hora limpio y estable (sin hacks internos) */
+        .flatpickr-calendar.noCalendar {
+            background: #ffffff;
+            border-color: #d8e3ee;
+            box-shadow: 0 18px 36px rgba(15, 50, 85, 0.22);
+        }
+
+        .flatpickr-calendar.noCalendar .flatpickr-time {
+            background: #ffffff;
+        }
+
+        .flatpickr-calendar.noCalendar .numInputWrapper {
+            background: #f4f8fc;
+            border-color: #d8e3ee;
+        }
+
+        .flatpickr-calendar.noCalendar .flatpickr-time input {
+            color: #173a5e;
+        }
+
+        .flatpickr-calendar {
+            z-index: 99999 !important;
+        }
+
+        body.fp-overlay-open::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.35);
+            z-index: 99990;
+        }
+
+        @media (max-width: 760px) {
+            .flatpickr-calendar.noCalendar.open {
+                position: fixed !important;
+                left: 50% !important;
+                top: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                width: min(380px, 94vw) !important;
+            }
+        }
 
         .meta-time-row {
             display: flex;
@@ -1337,32 +1490,57 @@
         }
 
         .lj-fila-card select,
-        .lj-fila-card input[type="time"] {
+        .lj-fila-card input[type="time"],
+        .lj-fila-card input.fp-input-time,
+        .lj-fila-card input.lj-campo-inicio,
+        .lj-fila-card input.lj-campo-termino {
             width: 100%;
             border: 1px solid #CBD7E5;
             border-radius: 14px;
             padding: 8px 14px;
-            font-size: 21px;
             color: #17212D;
             background: linear-gradient(180deg, #FFFFFF 0%, #F7FAFD 100%);
             outline: none;
             transition: border-color 0.16s ease, box-shadow 0.16s ease;
             min-height: 46px;
+            height: 46px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            line-height: 46px;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+
+        /* Mantener SELECTs con su tamaño original */
+        .lj-fila-card select {
+            height: auto;
+            line-height: normal;
+            padding-top: 8px;
+            padding-bottom: 8px;
         }
 
         .lj-fila-card select:active,
-        .lj-fila-card input[type="time"]:active {
+        .lj-fila-card input[type="time"]:active,
+        .lj-fila-card input.fp-input-time:active,
+        .lj-fila-card input.lj-campo-inicio:active,
+        .lj-fila-card input.lj-campo-termino:active {
             border-color: #79AEE0;
             background: #FFFFFF;
         }
 
-        .lj-fila-card input[type="time"]::-webkit-calendar-picker-indicator {
+        .lj-fila-card input[type="time"]::-webkit-calendar-picker-indicator,
+        .lj-fila-card input.fp-input-time::-webkit-calendar-picker-indicator,
+        .lj-fila-card input.lj-campo-inicio::-webkit-calendar-picker-indicator,
+        .lj-fila-card input.lj-campo-termino::-webkit-calendar-picker-indicator {
             width: 15px;
             height: 15px;
             opacity: 0.9;
         }
 
-        .lj-time-field input[type="time"] { padding-right: 12px; }
+        .lj-time-field input[type="time"],
+        .lj-time-field input.fp-input-time,
+        .lj-time-field input.lj-campo-inicio,
+        .lj-time-field input.lj-campo-termino { padding-right: 12px; }
 
         .lj-fila-card select {
             appearance: none;
@@ -1374,13 +1552,30 @@
         }
 
         .lj-fila-card select:focus,
-        .lj-fila-card input[type="time"]:focus {
+        .lj-fila-card input[type="time"]:focus,
+        .lj-fila-card input.fp-input-time:focus,
+        .lj-fila-card input.lj-campo-inicio:focus,
+        .lj-fila-card input.lj-campo-termino:focus {
             border-color: #8FBCE9;
             box-shadow: 0 0 0 3px rgba(37, 99, 168, 0.16);
         }
 
         .lj-fila-card select:disabled,
-        .lj-fila-card input[type="time"][readonly] { opacity: 1; cursor: pointer; }
+        .lj-fila-card input[type="time"][readonly],
+        .lj-fila-card input.fp-input-time[readonly],
+        .lj-fila-card input.lj-campo-inicio[readonly],
+        .lj-fila-card input.lj-campo-termino[readonly] { opacity: 1; cursor: pointer; }
+
+        .lj-fila-card input.lj-campo-inicio::placeholder,
+        .lj-fila-card input.lj-campo-termino::placeholder,
+        .lj-fila-card input.fp-input-time::placeholder {
+            color: #6f8298;
+            opacity: 1;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            font-size: 16px;
+            text-align: center;
+        }
 
         .lj-jarras-tabla {
             width: 100%;
@@ -1828,6 +2023,106 @@
         }
 
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        .time-picker-modal {
+            width: min(420px, 94vw);
+            background: #ffffff;
+            border: 1px solid #d8e3ee;
+            border-radius: 18px;
+            box-shadow: 0 20px 42px rgba(15, 50, 85, 0.26);
+            padding: 14px;
+            animation: fp-fade-in 0.16s ease;
+            margin: 10px 0;
+        }
+
+        #time-picker-modal-overlay {
+            align-items: center;
+            padding: 14px 12px calc(14px + env(safe-area-inset-bottom));
+        }
+
+        .time-picker-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .time-picker-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: #2a4667;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+
+        .time-picker-current {
+            font-size: 19px;
+            font-weight: 900;
+            color: var(--primary);
+            letter-spacing: 0.03em;
+        }
+
+        .time-picker-wheel {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .time-picker-col {
+            display: grid;
+            grid-template-rows: 34px 1fr 34px;
+            gap: 6px;
+            justify-items: stretch;
+        }
+
+        .time-picker-step {
+            border: 1px solid #d3dfec;
+            border-radius: 10px;
+            background: #f5f9fd;
+            color: #2d5688;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .time-picker-value {
+            border: 1px solid #c8d7e8;
+            border-radius: 12px;
+            background: #ffffff;
+            text-align: center;
+            font-size: 38px;
+            line-height: 1.15;
+            font-weight: 900;
+            color: #163f69;
+            padding: 6px 0;
+            letter-spacing: 0.04em;
+            user-select: none;
+        }
+
+        .time-picker-sep {
+            font-size: 30px;
+            font-weight: 900;
+            color: #1f4f82;
+            padding: 0 3px;
+            user-select: none;
+        }
+
+        .time-picker-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .time-picker-actions .btn-secondary,
+        .time-picker-actions .btn-save {
+            min-height: 42px;
+            padding: 0 14px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 800;
+        }
 
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 5px; }

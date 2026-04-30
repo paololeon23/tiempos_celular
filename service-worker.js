@@ -1,4 +1,4 @@
-const SW_VERSION = 'v2';
+const SW_VERSION = 'v3';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 80;
@@ -11,7 +11,10 @@ const APP_SHELL = [
     './network.js',
     './script.js',
     './librerias/lucide.min.js',
-    './librerias/sweetalert2.all.min.js'
+    './librerias/sweetalert2.all.min.js',
+    './librerias/flatpickr.min.js',
+    './librerias/flatpickr.min.css',
+    './librerias/flatpickr-l10n-es.js'
 ];
 
 self.addEventListener('install', (event) => {

@@ -6,6 +6,7 @@
     <title>Control de Pesos Pro - 2026</title>
     <link rel="icon" href="data:,">
     <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./librerias/flatpickr.min.css">
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -333,6 +334,33 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="time-picker-modal-overlay">
+        <div class="time-picker-modal">
+            <div class="time-picker-head">
+                <div class="time-picker-title">Seleccionar hora</div>
+                <div class="time-picker-current" id="time-picker-current">--:--</div>
+            </div>
+            <div class="time-picker-wheel">
+                <div class="time-picker-col">
+                    <button type="button" class="time-picker-step" id="time-picker-hour-up" aria-label="Subir hora">▲</button>
+                    <div class="time-picker-value" id="time-picker-hour">00</div>
+                    <button type="button" class="time-picker-step" id="time-picker-hour-down" aria-label="Bajar hora">▼</button>
+                </div>
+                <div class="time-picker-sep">:</div>
+                <div class="time-picker-col">
+                    <button type="button" class="time-picker-step" id="time-picker-minute-up" aria-label="Subir minuto">▲</button>
+                    <div class="time-picker-value" id="time-picker-minute">00</div>
+                    <button type="button" class="time-picker-step" id="time-picker-minute-down" aria-label="Bajar minuto">▼</button>
+                </div>
+            </div>
+            <div class="time-picker-actions">
+                <button type="button" class="btn-secondary" id="time-picker-now">Tomar hora exacta</button>
+                <button type="button" class="btn-secondary" id="time-picker-cancel">Cancelar</button>
+                <button type="button" class="btn-save" id="time-picker-apply">Tomar hora</button>
+            </div>
+        </div>
+    </div>
+
     <nav id="main-bottom-nav">
         <a class="nav-btn nav-link active" id="nav-campo" data-nav-index="0" href="./" aria-label="Campo">
             <i data-lucide="house"></i>
@@ -354,6 +382,8 @@
 
     <script src="./librerias/lucide.min.js"></script>
     <script src="./librerias/sweetalert2.all.min.js"></script>
+    <script src="./librerias/flatpickr.min.js"></script>
+    <script src="./librerias/flatpickr-l10n-es.js"></script>
     <script src="./app.js" charset="utf-8"></script>
     <script src="./network.js"></script>
     <script src="./script.js"></script>
