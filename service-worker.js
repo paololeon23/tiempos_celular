@@ -1,4 +1,4 @@
-const SW_VERSION = 'v3';
+const SW_VERSION = 'v62';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 80;
@@ -14,7 +14,14 @@ const APP_SHELL = [
     './librerias/sweetalert2.all.min.js',
     './librerias/flatpickr.min.js',
     './librerias/flatpickr.min.css',
-    './librerias/flatpickr-l10n-es.js'
+    './librerias/flatpickr-l10n-es.js',
+    './manifest.json',
+    './icons/icon-32.png',
+    './icons/icon-192.png',
+    './icons/icon-512.png',
+    './packing/index.html',
+    './packing/packing.js',
+    './time-picker.js'
 ];
 
 self.addEventListener('install', (event) => {

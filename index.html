@@ -1,10 +1,15 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control de Pesos Pro - 2026</title>
-    <link rel="icon" href="data:,">
+    <meta name="application-name" content="Muestras Web">
+    <meta name="apple-mobile-web-app-title" content="Muestras Web">
+    <meta name="theme-color" content="#164C7C">
+    <!-- Título e icono de la pestaña: van en el HTML; no dependen del borrador/localStorage. -->
+    <title>Muestras Web</title>
+    <link rel="icon" href="./icons/icon-32.png" type="image/png" sizes="32x32">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" sizes="192x192">
     <link rel="manifest" href="./manifest.json">
     <link rel="stylesheet" href="./librerias/flatpickr.min.css">
     <link rel="stylesheet" href="./styles.css">
@@ -85,32 +90,30 @@
                                 </div>
                                 <div>
                                     <label class="meta-block-title" for="visual-num-muestra" style="margin-bottom: 8px;">N° muestra</label>
-                                    <input class="meta-inp" id="visual-num-muestra" name="numMuestra" type="text" maxlength="4" placeholder="Ej. 001">
+                                    <div class="meta-num-muestra-wrap" id="visual-num-muestra-wrap">
+                                        <input class="meta-inp meta-inp--num-muestra-auto" id="visual-num-muestra" name="numMuestra" type="text" maxlength="8" placeholder="Automático" disabled aria-describedby="visual-num-muestra-hint" title="Se asigna solo según el último número en la planilla (sin duplicados)">
+                                        <span class="meta-num-muestra-spinner" id="visual-num-muestra-spinner" aria-hidden="true"></span>
+                                    </div>
+                                    <span id="visual-num-muestra-hint" class="sr-only">Campo automático. El número avanza según los registros ya guardados.</span>
                                 </div>
                             </div>
                         </div>
 
                         <div class="meta-block">
-                            <div class="meta-row-2">
+                            <label class="meta-block-title" for="visual-responsable" style="margin-bottom: 8px;">Responsable</label>
+                            <input class="meta-inp" id="visual-responsable" name="responsable" type="text" placeholder="Nombre">
+                        </div>
+
+                        <div class="meta-block">
+                            <div class="meta-row-2 meta-row-2--guia-hora">
                                 <div>
-                                    <label class="meta-block-title" for="visual-responsable" style="margin-bottom: 8px;">Responsable</label>
-                                    <input class="meta-inp" id="visual-responsable" name="responsable" type="text" placeholder="Nombre">
-                                </div>
-                                <div>
-                                    <label class="meta-block-title" for="visual-guia-precosecha" style="margin-bottom: 8px;">Días de precosecha / N° de cosecha</label>
+                                    <label class="meta-block-title" for="visual-guia-precosecha" style="margin-bottom: 8px;">Días Prec. / N° Cos.</label>
                                     <input class="meta-inp" id="visual-guia-precosecha" name="guiaPrecosecha" type="text" placeholder="Ej. 5 / 12" inputmode="text" autocomplete="off" aria-label="Días de precosecha y número de cosecha">
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="meta-block">
-                            <span class="meta-block-title" style="display:block;margin-bottom:8px;">Hora inicio</span>
-                            <div class="meta-time-row">
-                                <input class="meta-inp" id="visual-hora" name="hora" type="time" enterkeyhint="done">
-                                <button type="button" class="meta-btn-ahora" id="meta-btn-ahora" title="Iniciar ahora">
-                                    <i data-lucide="clock-3"></i>
-                                    Iniciar
-                                </button>
+                                <div>
+                                    <label class="meta-block-title" for="visual-hora" style="margin-bottom: 8px;">Hora inicio</label>
+                                    <input class="meta-inp" id="visual-hora" name="hora" type="time" enterkeyhint="done">
+                                </div>
                             </div>
                         </div>
 
@@ -234,7 +237,10 @@
 
     <div class="fab-menu" id="fab-menu">
         <div class="fab-menu-actions">
-            <button class="fab-mini fab-mini--danger" onclick="borrarTodoYCacheRapido()" aria-label="Eliminar todo y caché local">
+            <button class="fab-mini fab-mini--sync" type="button" onclick="sincronizarConPlanillaAhora()" aria-label="Actualizar desde planilla" title="Lee la planilla en Google y actualiza N° muestra y muestras bloqueadas (no borra tus datos)">
+                <i data-lucide="refresh-cw"></i>
+            </button>
+            <button class="fab-mini fab-mini--danger" onclick="borrarTodoYCacheRapido()" aria-label="Eliminar todo y caché local" title="Forzar reinicio: borra todo lo local y recarga">
                 <i data-lucide="trash-2"></i>
             </button>
             <button class="fab-mini" onclick="abrirModalResumenGlobal()" aria-label="Resumen despacho acopio-campo">
@@ -246,6 +252,9 @@
                 </svg>
             </button>
         </div>
+        <button type="button" class="fab-mini fab-mini--registro" id="fab-btn-iniciar-registro" onclick="fabIniciarRegistroDesdeFab()" aria-label="Cargar datos de prueba (simulación)" title="Rellena meta, 8 clamshell y jarras de ejemplo para probar y enviar">
+            <i data-lucide="clipboard-list"></i>
+        </button>
         <div class="fecha-ring-widget fecha-ring-widget--fab" id="visual-fecha-ring-widget" aria-label="Fecha actual">
             <div class="fecha-ring-circle" aria-hidden="true"></div>
             <div class="fecha-ring-content">

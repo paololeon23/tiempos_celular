@@ -16,6 +16,9 @@ var C5_START_COL = THERMOKING_START_COL + THERMOKING_COLS; // 126
 /** 46 columnas Hoja 1 (registro): un solo orden; debe coincidir con app.js construirFilaBaseRegistro. */
 var NUM_COLS_REGISTRO = 46;
 
+/** Máximo NUM_MUESTRA “consumido” en el tiempo; solo sube (borrar filas en hoja no retrocede la secuencia). */
+var NUM_MUESTRA_WATERMARK_KEY = 'mtpp_num_muestra_watermark_v1';
+
 function getRegistroHeadersHoja1_() {
   return [
     "FECHA", "ENSAYO_NOMBRE", "NUM_MUESTRA", "RESPONSABLE", "DIAS_PRECOSECHA", "HORA_INICIO_GENERAL", "FUNDO",
@@ -169,8 +172,120 @@ function extraerNumMuestraDesdeRowPost_(row) {
   return normalizarNumMuestraClave(row[2]);
 }
 
+/** Solo dígitos en NUM_MUESTRA; 0 si no aplica. Acepta número de celda (hoja). */
+function parseNumMuestraDigitosGs_(v) {
+  if (typeof v === 'number' && !isNaN(v) && isFinite(v) && v >= 0) {
+    var fl = Math.floor(v);
+    if (Math.abs(v - fl) < 1e-6) return fl;
+  }
+  var s = (v != null && v !== undefined) ? String(v).trim() : '';
+  if (!/^\d+$/.test(s)) return 0;
+  var n = parseInt(s, 10);
+  return (isNaN(n) || n < 0) ? 0 : n;
+}
+
+/** Índice 0-based de la columna NUM_MUESTRA según fila 1 (por si hubo columnas extra a la izquierda). */
+function indiceColumnaNumMuestraHoja1_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return 2;
+  var w = Math.min(lastCol, NUM_COLS_REGISTRO);
+  var headers = sheet.getRange(1, 1, 1, w).getValues()[0];
+  var target = 'NUMMUESTRA';
+  for (var c = 0; c < headers.length; c++) {
+    var key = String(headers[c] != null ? headers[c] : '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (key === target) return c;
+  }
+  return 2;
+}
+
+/** Máximo numérico solo en columna NUM_MUESTRA (fila 2..última con dato en esa columna). */
+function maxNumMuestraEnHoja_(sheet) {
+  var idx = indiceColumnaNumMuestraHoja1_(sheet);
+  var lastRow = sheet.getLastRow();
+  var maxNum = 0;
+  if (lastRow < 2) return 0;
+  var col1 = idx + 1;
+  var values = sheet.getRange(2, col1, lastRow, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var n = parseNumMuestraDigitosGs_(values[i][0]);
+    if (n > maxNum) maxNum = n;
+  }
+  return maxNum;
+}
+
+/** Última celda con dato en NUM_MUESTRA (de abajo hacia arriba). Ej. fila 17 = "8205". */
+function ultimoNumMuestraCeldaHoja_(sheet) {
+  var idx = indiceColumnaNumMuestraHoja1_(sheet);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return { valorTexto: '', fila: 0, digitos: 0 };
+  }
+  var col1 = idx + 1;
+  var values = sheet.getRange(2, col1, lastRow, 1).getValues();
+  for (var i = values.length - 1; i >= 0; i--) {
+    var raw = values[i][0];
+    if (raw === null || raw === undefined) continue;
+    var s = String(raw).trim();
+    if (s === '') continue;
+    return {
+      valorTexto: s,
+      fila: i + 2,
+      digitos: parseNumMuestraDigitosGs_(raw)
+    };
+  }
+  return { valorTexto: '', fila: 0, digitos: 0 };
+}
+
+function leerWatermarkNumMuestra_() {
+  var raw = PropertiesService.getScriptProperties().getProperty(NUM_MUESTRA_WATERMARK_KEY);
+  if (!raw) return 0;
+  var n = parseInt(String(raw).trim(), 10);
+  return (isNaN(n) || n < 0) ? 0 : n;
+}
+
+/** Sube el watermark a al menos n; nunca lo baja. */
+function fusionarWatermarkNumMuestra_(n) {
+  var nInt = typeof n === 'number' ? Math.floor(n) : parseNumMuestraDigitosGs_(n);
+  if (isNaN(nInt) || nInt < 0) return;
+  var props = PropertiesService.getScriptProperties();
+  var cur = leerWatermarkNumMuestra_();
+  var next = Math.max(cur, nInt);
+  if (next > cur) props.setProperty(NUM_MUESTRA_WATERMARK_KEY, String(next));
+}
+
 /**
- * Busca si existe NUM_MUESTRA en la hoja (col C) y devuelve detalle.
+ * Próximo NUM_MUESTRA.
+ * @param {boolean} soloDesdeHoja Si true (consultas app): solo columna NUM_MUESTRA de la planilla.
+ *        Si false (reservas al guardar): max(hoja, watermark) para no reutilizar códigos borrados.
+ */
+function resolverProximoNumMuestraJson_(sheet, soloDesdeHoja) {
+  var ultimoCelda = ultimoNumMuestraCeldaHoja_(sheet);
+  var sheetMax = maxNumMuestraEnHoja_(sheet);
+  var baseUltimo = ultimoCelda.digitos > 0 ? ultimoCelda.digitos : sheetMax;
+  if (soloDesdeHoja) {
+    var nextSolo = baseUltimo + 1;
+    var nextStrSolo = String(nextSolo);
+    if (nextStrSolo.length < 4) nextStrSolo = String(nextSolo).padStart(4, '0');
+    return {
+      max_en_hoja: baseUltimo,
+      ultimo_num_muestra_celda: ultimoCelda.valorTexto,
+      ultimo_num_muestra_fila: ultimoCelda.fila,
+      ultimo_num_muestra_en_hoja: baseUltimo,
+      max_digitos_columna: sheetMax,
+      proximo_num_muestra: nextStrSolo
+    };
+  }
+  var wm = leerWatermarkNumMuestra_();
+  var M = Math.max(sheetMax, wm);
+  fusionarWatermarkNumMuestra_(M);
+  var nextN = M + 1;
+  var nextStr = String(nextN);
+  if (nextStr.length < 4) nextStr = String(nextN).padStart(4, '0');
+  return { max_en_hoja: M, proximo_num_muestra: nextStr };
+}
+
+/**
+ * Busca si existe NUM_MUESTRA en la hoja y devuelve detalle.
  * Retorna null si no existe.
  */
 function buscarDuplicadoNumMuestraEnHoja_(sheet, numMuestraNorm) {
@@ -178,9 +293,11 @@ function buscarDuplicadoNumMuestraEnHoja_(sheet, numMuestraNorm) {
   if (!nm) return null;
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
-  var vals = sheet.getRange(2, 1, lastRow - 1, 14).getValues(); // FECHA, ... , NUM_MUESTRA(col3), ... , ENSAYO_NUMERO(col14)
+  var idx = indiceColumnaNumMuestraHoja1_(sheet);
+  var numCols = Math.max(14, idx + 1, NUM_COLS_REGISTRO);
+  var vals = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   for (var i = 0; i < vals.length; i++) {
-    var rowNm = normalizarNumMuestraClave(vals[i][2]);
+    var rowNm = normalizarNumMuestraClave(vals[i].length > idx ? vals[i][idx] : '');
     if (!rowNm || rowNm !== nm) continue;
     return {
       num_muestra: nm,
@@ -191,6 +308,23 @@ function buscarDuplicadoNumMuestraEnHoja_(sheet, numMuestraNorm) {
   return null;
 }
 
+/** True si alguna celda tiene dato de packing real (no vacío ni solo cero). */
+function cellHasPackingValue_(v) {
+  if (v === null || v === undefined) return false;
+  var s = String(v).trim();
+  if (!s) return false;
+  if (s === '0' || s === '0.0' || s === '0,0') return false;
+  return true;
+}
+
+function rowHasPackingData_(arr) {
+  if (!arr || !arr.length) return false;
+  for (var i = 0; i < arr.length; i++) {
+    if (cellHasPackingValue_(arr[i])) return true;
+  }
+  return false;
+}
+
 /** True si alguna celda del array (una fila de getValues) tiene texto no vacío. */
 function rowHasAnyNonEmpty_(arr) {
   if (!arr || !arr.length) return false;
@@ -198,6 +332,17 @@ function rowHasAnyNonEmpty_(arr) {
     if (arr[i] != null && String(arr[i]).trim() !== '') return true;
   }
   return false;
+}
+
+/** True si en esa fila hay al menos un dato de packing real (ignora ceros sueltos). */
+function rangeRowHasPackingData_(sheet, row, startCol, numCols) {
+  if (numCols <= 0 || row < 2) return false;
+  try {
+    var vals = sheet.getRange(row, startCol, 1, numCols).getValues()[0];
+    return rowHasPackingData_(vals);
+  } catch (e) {
+    return false;
+  }
 }
 
 /** True si en esa fila de hoja hay al menos un valor en el rango [startCol .. startCol+numCols-1]. */
@@ -337,8 +482,7 @@ function buildC5FlatRow(data, i) {
 function doPost(e) {
   function out(obj) {
     return ContentService.createTextOutput(JSON.stringify(obj))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader('Access-Control-Allow-Origin', '*');
+      .setMimeType(ContentService.MimeType.JSON);
   }
   if (!e || !e.postData || !e.postData.contents) {
     return out({ ok: false, error: "Sin datos POST" });
@@ -351,7 +495,17 @@ function doPost(e) {
 
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    const data = JSON.parse(e.postData.contents);
+    var rawBody = String(e.postData.contents || '');
+    var data;
+    try {
+      data = JSON.parse(rawBody);
+    } catch (jsonErr) {
+      return out({
+        ok: false,
+        error: "JSON inválido en POST",
+        detail: String(jsonErr)
+      });
+    }
 
     if (data.mode === 'packing') {
       var packingResult = doPostPacking(sheet, data);
@@ -367,33 +521,6 @@ function doPost(e) {
 
     if (rows.length === 0) {
       return out({ ok: false, error: "Sin filas" });
-    }
-
-    // Validación rápida y directa: NUM_MUESTRA es único globalmente en la columna C.
-    // Si existe, se rechaza inmediatamente y NO se intenta registrar.
-    var vistosPost = {};
-    for (var ri = 0; ri < rows.length; ri++) {
-      var nmPost = extraerNumMuestraDesdeRowPost_(rows[ri]);
-      if (!nmPost) continue;
-      if (vistosPost[nmPost]) {
-        return out({
-          ok: false,
-          code: "DUPLICATE_NUM_MUESTRA",
-          error: "NUM_MUESTRA repetido en el envío. Debes cambiar el N° muestra."
-        });
-      }
-      vistosPost[nmPost] = true;
-      var dupNm = buscarDuplicadoNumMuestraEnHoja_(sheet, nmPost);
-      if (dupNm) {
-        return out({
-          ok: false,
-          code: "DUPLICATE_NUM_MUESTRA",
-          error: "NUM_MUESTRA ya existe en la columna NUM_MUESTRA. Debes cambiar el N° muestra.",
-          num_muestra: dupNm.num_muestra,
-          fecha: dupNm.fecha,
-          ensayo_numero: dupNm.ensayo_numero
-        });
-      }
     }
 
     if (uid) {
@@ -481,7 +608,10 @@ function doPost(e) {
       if (existingKeys[key]) return;
       existingKeys[key] = true;
       filasHoja2.push(rowHoja2(fila, row.length >= minExpanded ? row : null));
-      if (!esCero(fila[14]) && !esCero(fila[16]) && !esCero(fila[17])) nuevasFilas.push(fila);
+      // Mantener criterio alineado al front:
+      // UI solo exige PESO_1 para guardar clamshell; PESO_2 y llegada/despacho pueden ir vacíos al inicio.
+      // Índices: 14=N_CLAMSHELL, 16=PESO_1.
+      if (!esCero(fila[14]) && !esCero(fila[16])) nuevasFilas.push(fila);
     });
 
     lastRow = sheet.getLastRow();
@@ -508,6 +638,9 @@ function doPost(e) {
       // NUM_MUESTRA (col 3) debe mantenerse como texto para conservar ceros a la izquierda (ej: 0001).
       sheet.getRange(startRow, 3, numRows, 1).setNumberFormat('@');
       sheet.getRange(startRow, 1, numRows, NUM_COLS).setValues(nuevasFilas);
+      for (var wmi = 0; wmi < nuevasFilas.length; wmi++) {
+        fusionarWatermarkNumMuestra_(parseNumMuestraDigitosGs_(nuevasFilas[wmi][2]));
+      }
     }
     if (filasHoja2.length > 0) {
       var sheet2 = SpreadsheetApp.getActiveSpreadsheet().getSheets()[1];
@@ -653,13 +786,32 @@ function doPostPacking(sheet, data) {
     }
 
     var primeraFila = rowIndices[0];
-    var packingYaExiste = rangeRowHasAnyValue_(sheet, primeraFila, PACKING_START_COL, PACKING_COLS);
+    var packingYaExiste = rangeRowHasPackingData_(sheet, primeraFila, PACKING_START_COL, PACKING_COLS);
     var guardarThermoking;
     if (data.guardar_thermoking === false || data.guardar_thermoking === 'false') guardarThermoking = false;
     else if (data.guardar_thermoking === true || data.guardar_thermoking === 'true') guardarThermoking = true;
     else guardarThermoking = packingYaExiste ? false : true;
 
     if (packingYaExiste) {
+      if (guardarPacking && packingRows.length) {
+        var startColMerge = PACKING_START_COL;
+        var colsPorFilaMerge = 4 + 36;
+        var baseHeadersMerge = ['FECHA_INSPECCION', 'RESPONSABLE', 'HORA_RECEPCION', 'N_VIAJE'].concat(getPackingHeaderNamesPerRow());
+        for (var pm = 0; pm < packingRows.length && pm < rowIndices.length; pm++) {
+          var rowMerge = packingRows[pm];
+          var filaHojaMerge = rowIndices[pm];
+          var valoresMerge = [fechaInspeccion, responsable, horaRecepcion, nViaje];
+          if (Array.isArray(rowMerge)) {
+            for (var jm = 0; jm < 36; jm++) {
+              valoresMerge.push((jm < rowMerge.length && rowMerge[jm] != null && rowMerge[jm] !== '') ? rowMerge[jm] : '');
+            }
+          } else {
+            for (var jm2 = 0; jm2 < 36; jm2++) valoresMerge.push('');
+          }
+          sheet.getRange(filaHojaMerge, startColMerge, 1, colsPorFilaMerge).setValues([valoresMerge]);
+        }
+        sheet.getRange(1, startColMerge, 1, baseHeadersMerge.length).setValues([baseHeadersMerge]);
+      }
       if (actualizarC5) {
         var c5HeadersMerge = getC5FlatHeaders();
         sheet.getRange(1, C5_START_COL, 1, c5HeadersMerge.length).setValues([c5HeadersMerge]);
@@ -676,14 +828,15 @@ function doPostPacking(sheet, data) {
           sheet.getRange(rowIndices[tix], THERMOKING_START_COL, 1, termoMerge.length).setValues([termoMerge]);
         }
       }
-      if (!actualizarC5 && !guardarThermoking) {
+      if (!actualizarC5 && !guardarThermoking && !(guardarPacking && packingRows.length)) {
         return { ok: false, error: 'Nada que actualizar (packing ya en hoja; sin C5 ni Thermo King)' };
       }
       return {
         ok: true,
         message: 'Actualización en ' + rowIndices.length + ' fila(s) (packing existente; C5/Thermo según flags)',
         filasEscritas: rowIndices.length,
-        mergeSoloC5: actualizarC5
+        mergeSoloC5: actualizarC5,
+        packingActualizado: !!(guardarPacking && packingRows.length)
       };
     }
 
@@ -805,7 +958,57 @@ function doGet(e) {
       return returnOutput(result);
     }
 
-    // Validación rápida para NUM_MUESTRA global (columna C).
+    // Siguiente NUM_MUESTRA: max(hoja, watermark monotónico) + 1 (borrar filas no retrocede).
+    var proximoNumMuestra = (params.proximo_num_muestra || '').toString().trim() === '1';
+    if (proximoNumMuestra) {
+      var sheetPm = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+      var pm = resolverProximoNumMuestraJson_(sheetPm, true);
+      result.ok = true;
+      result.max_en_hoja = pm.max_en_hoja;
+      result.ultimo_num_muestra_celda = pm.ultimo_num_muestra_celda;
+      result.ultimo_num_muestra_fila = pm.ultimo_num_muestra_fila;
+      result.ultimo_num_muestra_en_hoja = pm.ultimo_num_muestra_en_hoja;
+      result.max_digitos_columna = pm.max_digitos_columna;
+      result.proximo_num_muestra = pm.proximo_num_muestra;
+      return returnOutput(result);
+    }
+
+    // Una sola lectura: próximo N° muestra + ensayos ya registrados en una fecha (bloqueo rápido).
+    var estadoOperativo = (params.estado_operativo || '').toString().trim() === '1';
+    if (estadoOperativo) {
+      var sheetOp = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+      var pmOp = resolverProximoNumMuestraJson_(sheetOp, true);
+      result.ok = true;
+      result.max_en_hoja = pmOp.max_en_hoja;
+      result.ultimo_num_muestra_celda = pmOp.ultimo_num_muestra_celda;
+      result.ultimo_num_muestra_fila = pmOp.ultimo_num_muestra_fila;
+      result.ultimo_num_muestra_en_hoja = pmOp.ultimo_num_muestra_en_hoja;
+      result.max_digitos_columna = pmOp.max_digitos_columna;
+      result.proximo_num_muestra = pmOp.proximo_num_muestra;
+      result.ensayos = [];
+      var fechaOp = (params.fecha || '').toString().trim();
+      if (fechaOp) {
+        var fechaOpNorm = formatFechaPacking(fechaOp) || fechaOp;
+        var lastRowOp = sheetOp.getLastRow();
+        if (lastRowOp >= 2) {
+          var dataOp = sheetOp.getRange(2, 1, lastRowOp, 14).getValues();
+          var ensSetOp = {};
+          for (var oi = 0; oi < dataOp.length; oi++) {
+            var fOp = formatFechaPacking(dataOp[oi][0]);
+            if (fOp !== fechaOpNorm) continue;
+            var enOp = dataOp[oi][13];
+            var enOpStr = (enOp !== null && enOp !== undefined && enOp !== '')
+              ? (Number(enOp) === Math.floor(Number(enOp)) ? String(Number(enOp)) : String(enOp).trim())
+              : '';
+            if (enOpStr) ensSetOp[enOpStr] = true;
+          }
+          result.ensayos = Object.keys(ensSetOp).sort();
+        }
+      }
+      return returnOutput(result);
+    }
+
+    // Validación rápida para NUM_MUESTRA global (columna según encabezado NUM_MUESTRA).
     // Se atiende antes de otras lecturas para responder más rápido.
     if (existeNumMuestraGlobal) {
       if (!numMuestraParam) {
@@ -821,9 +1024,11 @@ function doGet(e) {
         result.num_muestra = numMuestraBaseParam;
         return returnOutput(result);
       }
-      var dataNm = sheetNm.getRange(2, 1, lastRowNm - 1, 14).getValues();
+      var idxNm = indiceColumnaNumMuestraHoja1_(sheetNm);
+      var numColsNm = Math.max(14, idxNm + 1, NUM_COLS_REGISTRO);
+      var dataNm = sheetNm.getRange(2, 1, lastRowNm - 1, numColsNm).getValues();
       for (var ni = 0; ni < dataNm.length; ni++) {
-        var nmBase = normalizarNumMuestraClave(dataNm[ni][2]);
+        var nmBase = normalizarNumMuestraClave(dataNm[ni].length > idxNm ? dataNm[ni][idxNm] : '');
         if (nmBase && nmBase === numMuestraBaseParam) {
           var fNm = formatFechaPacking(dataNm[ni][0]);
           var enNm = dataNm[ni][13];
@@ -849,7 +1054,9 @@ function doGet(e) {
       return returnOutput(result);
     }
 
-    var data = sheet.getRange(2, 1, lastRow, 20).getValues();
+    var idxNumRow = indiceColumnaNumMuestraHoja1_(sheet);
+    var dataColW = Math.max(20, idxNumRow + 1, NUM_COLS_REGISTRO);
+    var data = sheet.getRange(2, 1, lastRow, dataColW).getValues();
 
     function formatFecha(val) {
       if (val === null || val === undefined || val === '') return '';
@@ -891,7 +1098,7 @@ function doGet(e) {
         var en = r[13];
         var enStr = (en !== null && en !== undefined && en !== '') ? (Number(en) === Math.floor(Number(en)) ? String(Number(en)) : String(en).trim()) : '';
         var nom = (r[1] != null && r[1] !== undefined && String(r[1]).trim() !== '') ? String(r[1]).trim() : ('Ensayo ' + enStr);
-        var numMuestra = (r[2] != null && r[2] !== undefined) ? String(r[2]).trim() : '';
+        var numMuestra = (r.length > idxNumRow && r[idxNumRow] != null && r[idxNumRow] !== undefined) ? String(r[idxNumRow]).trim() : '';
         var nClamshell = (r[14] != null && r[14] !== undefined) ? String(r[14]).trim() : '';
         if (!f || enStr === '') continue;
         registrados.push({
@@ -904,6 +1111,48 @@ function doGet(e) {
       }
       result.ok = true;
       result.registrados = registrados;
+      return returnOutput(result);
+    }
+
+    var listadoMuestrasFecha = (params.listado_muestras_fecha || '').toString().trim() === '1';
+    if (listadoMuestrasFecha) {
+      if (!fechaParam) {
+        result.error = 'Falta parámetro: fecha';
+        return returnOutput(result);
+      }
+      var fechaLm = (fechaParam && formatFecha(fechaParam)) ? formatFecha(fechaParam) : fechaParam;
+      var muestrasLm = [];
+      var seenLm = {};
+      for (var lmi = 0; lmi < data.length; lmi++) {
+        var rl = data[lmi];
+        var fl = formatFecha(rl[0]);
+        if (fl !== fechaLm) continue;
+        var enl = rl[13];
+        var enStrLm = (enl !== null && enl !== undefined && enl !== '')
+          ? (Number(enl) === Math.floor(Number(enl)) ? String(Number(enl)) : String(enl).trim())
+          : '';
+        var numLm = (rl.length > idxNumRow && rl[idxNumRow] != null && rl[idxNumRow] !== undefined)
+          ? String(rl[idxNumRow]).trim()
+          : '';
+        if (!enStrLm || !numLm) continue;
+        var keyLm = numLm + '|' + enStrLm;
+        if (seenLm[keyLm]) continue;
+        seenLm[keyLm] = true;
+        muestrasLm.push({
+          num_muestra: numLm,
+          ensayo_numero: enStrLm,
+          etiqueta: numLm + ' - ' + enStrLm + ' muestra'
+        });
+      }
+      muestrasLm.sort(function (a, b) {
+        var na = Number(a.ensayo_numero) || 0;
+        var nb = Number(b.ensayo_numero) || 0;
+        if (na !== nb) return na - nb;
+        return String(a.num_muestra).localeCompare(String(b.num_muestra));
+      });
+      result.ok = true;
+      result.fecha = fechaLm;
+      result.muestras = muestrasLm;
       return returnOutput(result);
     }
 
@@ -987,6 +1236,7 @@ function doGet(e) {
     var row = null;
     var filaEnSheet = null;
     var numFilas = 0;
+    var filasPackingRegistradas = 0;
     var despachoPorFila = [];
     var tienePacking = false;
     var tieneRecepcionC5 = false;
@@ -1010,7 +1260,11 @@ function doGet(e) {
         var numDesp = (desp !== null && desp !== undefined && String(desp).trim() !== '') ? parseFloat(String(desp).replace(',', '.')) : NaN;
         despachoPorFila.push(!isNaN(numDesp) ? numDesp : null);
         var filaSheetK = 2 + k;
-        if (rangeRowHasAnyValue_(sheet, filaSheetK, PACKING_START_COL, PACKING_COLS)) tienePacking = true;
+        var filaTienePacking = rangeRowHasPackingData_(sheet, filaSheetK, PACKING_START_COL, PACKING_COLS);
+        if (filaTienePacking) {
+          tienePacking = true;
+          filasPackingRegistradas++;
+        }
         if (rangeRowHasAnyValue_(sheet, filaSheetK, C5_START_COL, c5NumColsDetalle)) tieneRecepcionC5 = true;
         if (rangeRowHasAnyValue_(sheet, filaSheetK, THERMOKING_START_COL, THERMOKING_COLS)) tieneThermoKing = true;
       }
@@ -1021,16 +1275,40 @@ function doGet(e) {
       return returnOutput(result);
     }
 
+    var nClamshellRaw = row[14];
+    var maxClamshell = 0;
+    if (nClamshellRaw !== null && nClamshellRaw !== undefined && String(nClamshellRaw).trim() !== '') {
+      var nCl = parseInt(String(nClamshellRaw).trim(), 10);
+      if (!isNaN(nCl) && nCl > 0) maxClamshell = nCl;
+    }
+    if (numFilas > 0 && (maxClamshell <= 0 || maxClamshell < numFilas)) {
+      maxClamshell = numFilas;
+    }
+    var despachoRaw = row[19];
+    var despachoGramos = null;
+    if (despachoRaw !== null && despachoRaw !== undefined && String(despachoRaw).trim() !== '') {
+      var numDesp = parseFloat(String(despachoRaw).replace(',', '.'));
+      if (!isNaN(numDesp)) despachoGramos = numDesp;
+    }
+
     result.ok = true;
     result.data = {
       fila: filaEnSheet,
       numFilas: numFilas,
+      FILAS_REGISTRADAS: numFilas,
+      FILAS_TOTAL_CAMPO: numFilas,
+      FILAS_PACKING_REGISTRADAS: filasPackingRegistradas,
+      MAX_CLAMSHELL: maxClamshell,
+      N_CLAMSHELL: (nClamshellRaw !== null && nClamshellRaw !== undefined) ? String(nClamshellRaw).trim() : '',
+      puede_registrar_mas: maxClamshell > 0 ? (filasPackingRegistradas < maxClamshell) : true,
       tienePacking: tienePacking,
       tieneRecepcionC5: tieneRecepcionC5,
       tieneThermoKing: tieneThermoKing,
       despachoPorFila: despachoPorFila,
+      DESPACHO_ACOPIO: despachoGramos,
+      despacho_acopio_gramos: despachoGramos,
       ENSAYO_NOMBRE: row[1],
-      NUM_MUESTRA: row[2],
+      NUM_MUESTRA: (row.length > idxNumRow && row[idxNumRow] != null && row[idxNumRow] !== undefined) ? String(row[idxNumRow]).trim() : '',
       RESPONSABLE: row[3],
       ENSAYO_NUMERO: row[13],
       TRAZ_ETAPA: row[7],
