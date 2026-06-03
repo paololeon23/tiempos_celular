@@ -898,8 +898,6 @@
 
     const elFabMenu = document.getElementById('fab-menu-packing');
     const elFabOptionsBtn = document.getElementById('fab-options-btn-packing');
-    const elResumenModal = document.getElementById('packing-resumen-modal-overlay');
-    const elResumenBody = document.getElementById('packing-resumen-body');
 
     function crearIconosPacking() {
         if (window.lucide && typeof window.lucide.createIcons === 'function') {
@@ -1005,41 +1003,6 @@
         setTimeout(() => window.location.reload(), 350);
     }
 
-    function htmlResumenServidorPacking() {
-        const d = lastDetallePacking;
-        if (!d) {
-            return '<p class="packing-resumen-empty">Selecciona fecha y muestra para ver el resumen del servidor.</p>';
-        }
-        const total = Number(d.FILAS_REGISTRADAS ?? d.numFilas ?? 0);
-        const max = Number(d.MAX_CLAMSHELL ?? 0);
-        const filas = Array.isArray(d.despachoPorFila) ? d.despachoPorFila.slice(0, total) : [];
-        let html = '<p><b>Clamshells en servidor:</b> ' + total + (max > 0 ? ' / ' + max : '') + '</p>';
-        html += '<p><b>Despacho acopio (campo), arriba → abajo:</b></p><ul class="packing-resumen-list">';
-        if (!filas.length) {
-            html += '<li>—</li>';
-        } else {
-            filas.forEach((v, i) => {
-                html += '<li>#' + (i + 1) + ': ' + (v != null && v !== '' ? v + ' g' : '—') + '</li>';
-            });
-        }
-        html += '</ul>';
-        return html;
-    }
-
-    function abrirModalResumenPacking() {
-        establecerMenuFlotantePacking(false);
-        if (!elResumenModal || !elResumenBody) return;
-        elResumenBody.innerHTML = htmlResumenServidorPacking();
-        elResumenModal.style.display = 'flex';
-        elResumenModal.setAttribute('aria-hidden', 'false');
-    }
-
-    function cerrarModalResumenPacking() {
-        if (!elResumenModal) return;
-        elResumenModal.style.display = 'none';
-        elResumenModal.setAttribute('aria-hidden', 'true');
-    }
-
     function fabIniciarRegistroPacking() {
         establecerMenuFlotantePacking(false);
         if (!muestraSeleccionada()) {
@@ -1120,6 +1083,25 @@
         if (!elResumen) return;
         elResumen.classList.toggle('is-empty', !visible);
         if (elResumenToggle) elResumenToggle.hidden = !visible;
+        syncPackingFoldBtnAnchor();
+    }
+
+    let foldBtnSyncRaf = 0;
+    function syncPackingFoldBtnAnchor() {
+        if (foldBtnSyncRaf) cancelAnimationFrame(foldBtnSyncRaf);
+        foldBtnSyncRaf = requestAnimationFrame(() => {
+            foldBtnSyncRaf = 0;
+            const shell = elMetaShell;
+            const select = elSelectBlock;
+            if (!shell || !select || elResumenToggle?.hidden) return;
+
+            shell.style.setProperty('--pk-select-end', select.offsetHeight + 'px');
+
+            const vacio = elResumen?.classList.contains('is-empty');
+            const compact = !vacio && elResumen?.classList.contains('is-collapsed');
+            shell.classList.toggle('is-fold-btn-compact', compact);
+            shell.classList.toggle('is-fold-btn-expanded', !vacio && !compact);
+        });
     }
 
     function setChipsPanelCollapsed(collapsed, persist) {
@@ -1137,9 +1119,11 @@
             } catch (_) { /* ignore */ }
         }
         crearIconosPacking();
+        syncPackingFoldBtnAnchor();
     }
 
     function toggleChipsPanelCollapsed() {
+        if (elResumen?.classList.contains('is-loading-resumen')) return;
         setChipsPanelCollapsed(!elChipsPanel?.classList.contains('is-collapsed'), true);
     }
 
@@ -1152,6 +1136,19 @@
         }
         if (elPreviewLoader) elPreviewLoader.hidden = !on;
         if (elPreviewLoaderMsg && mensaje) elPreviewLoaderMsg.textContent = mensaje;
+        if (elResumenToggle) {
+            elResumenToggle.disabled = !!on;
+            elResumenToggle.setAttribute('aria-disabled', on ? 'true' : 'false');
+            elResumenToggle.classList.toggle('is-loading-blocked', !!on);
+            if (on) {
+                elResumenToggle.title = 'Espera mientras cargan los datos';
+            } else {
+                const collapsed = elChipsPanel?.classList.contains('is-collapsed');
+                const titulo = collapsed ? 'Mostrar datos del registro' : 'Ocultar datos del registro';
+                elResumenToggle.title = titulo;
+            }
+        }
+        syncPackingFoldBtnAnchor();
     }
 
     function setStatus(msg, tipo) {
@@ -1159,6 +1156,7 @@
         elStatus.textContent = msg || '';
         elStatus.className = 'packing-status-msg' + (tipo ? ' packing-status-msg--' + tipo : '');
         elStatus.hidden = !msg;
+        syncPackingFoldBtnAnchor();
     }
 
     function callbackJsonp(params) {
@@ -1330,6 +1328,7 @@
 
         reiniciarCardsPacking();
         setPackingCardHabilitada(muestraSeleccionada());
+        syncPackingFoldBtnAnchor();
     }
 
     function resetMuestraSelect(mensaje, deshabilitar) {
@@ -1479,10 +1478,6 @@
     elFabAgregar?.addEventListener('click', onFabAgregarPackingClick);
     elBtnEnviarPacking?.addEventListener('click', () => void guardarRegistroYEnviarDesdePantallaPacking());
     document.getElementById('fab-packing-demo')?.addEventListener('click', fabIniciarRegistroPacking);
-    document.getElementById('packing-resumen-cerrar')?.addEventListener('click', cerrarModalResumenPacking);
-    elResumenModal?.addEventListener('click', (e) => {
-        if (e.target === elResumenModal) cerrarModalResumenPacking();
-    });
     document.addEventListener('click', (e) => {
         if (elFabMenu && !elFabMenu.contains(e.target)) establecerMenuFlotantePacking(false);
     });
@@ -1585,10 +1580,17 @@
         void acotarFechaDesdePlanilla().then(onFechaCambiada);
     });
     window.addEventListener('offline', actualizarHeaderConexion);
+    window.addEventListener('resize', syncPackingFoldBtnAnchor, { passive: true });
+
+    if (typeof ResizeObserver !== 'undefined') {
+        const foldBtnResizeObs = new ResizeObserver(() => syncPackingFoldBtnAnchor());
+        if (elSelectBlock) foldBtnResizeObs.observe(elSelectBlock);
+        const clip = elMetaShell?.querySelector('.packing-meta-clip');
+        if (clip) foldBtnResizeObs.observe(clip);
+    }
 
     window.sincronizarConPlanillaPacking = sincronizarConPlanillaPacking;
     window.borrarTodoYCachePacking = borrarTodoYCachePacking;
-    window.abrirModalResumenPacking = abrirModalResumenPacking;
     window.fabIniciarRegistroPacking = fabIniciarRegistroPacking;
     window.agregarCardPacking = agregarCardPacking;
     window.agregarCardPackingYAbrirPesos = agregarCardPackingYAbrirPesos;
@@ -1611,6 +1613,7 @@
     initFechaInput();
     setChipsPanelCollapsed(false, false);
     limpiarPreview();
+    syncPackingFoldBtnAnchor();
 
     if (elFecha?.value) void cargarMuestrasPorFecha(elFecha.value);
     void acotarFechaDesdePlanilla().then(() => {

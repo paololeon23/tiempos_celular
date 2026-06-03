@@ -1584,30 +1584,6 @@
             border-top-left-radius: 1px;
         }
 
-        .lj-mini-btn--registro {
-            width: 30px;
-            height: 30px;
-            padding: 0;
-            color: #FFFFFF;
-            border: none;
-            background: #009488;
-            box-shadow: 0 3px 8px rgba(0, 148, 136, 0.32);
-            border-radius: 20px 0 30px 0;
-        }
-
-        .lj-mini-btn--registro:hover,
-        .lj-mini-btn--registro.is-active {
-            background: #00796b;
-        }
-
-        .lj-mini-btn--registro i,
-        .lj-mini-btn--registro svg {
-            width: 11px;
-            height: 11px;
-            stroke-width: 2.2px;
-            margin-bottom: 4px;
-        }
-
         .lj-mini-btn--delete i,
         .lj-mini-btn--delete svg {
             width: 14px;
@@ -3544,11 +3520,9 @@
         }
 
         body.packing-page header {
-            position: relative;
             overflow: visible;
             padding-left: clamp(14px, 4vw, 20px);
             padding-right: clamp(18px, 5vw, 24px);
-            padding-bottom: clamp(18px, 5vw, 24px);
         }
 
         body.packing-page .packing-meta-shell {
@@ -3557,50 +3531,6 @@
             width: 100%;
             max-width: 100%;
             box-sizing: border-box;
-            margin-bottom: 0;
-        }
-
-        /* Botón registro: esquina inferior-derecha — abierto y cerrado */
-        body.packing-page .packing-meta-shell > .packing-resumen-fold-btn {
-            position: absolute;
-            z-index: 151;
-            margin: 0;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            -webkit-tap-highlight-color: transparent;
-            transform: translate(50%, 50%);
-            transition: none;
-        }
-
-        /* Abierto: chips visibles */
-        body.packing-page .packing-meta-shell:has(.packing-resumen:not(.is-collapsed):not(.is-empty)) > .packing-resumen-fold-btn {
-            top: 89%;
-            left: 93%;
-            right: auto;
-            bottom: auto;
-        }
-
-        /* Cerrado: colapsado */
-        body.packing-page .packing-meta-shell:has(.packing-resumen.is-collapsed:not(.is-empty)) > .packing-resumen-fold-btn,
-        body.packing-page .packing-meta-shell > .packing-resumen-fold-btn.is-active {
-            top: 75%;
-            left: 93%;
-            right: auto;
-            bottom: 0;
-        }
-
-        body.packing-page .packing-meta-shell > .packing-resumen-fold-btn:active {
-            transform: translate(50%, 50%) scale(0.94);
-        }
-
-        body.packing-page .packing-meta-shell > .packing-resumen-fold-btn[hidden] {
-            display: none !important;
-        }
-
-        body.packing-page .packing-meta-shell > .packing-resumen-fold-btn.lj-mini-btn--registro:hover,
-        body.packing-page .packing-meta-shell > .packing-resumen-fold-btn.lj-mini-btn--registro.is-active {
-            background: #00796b;
         }
 
         .packing-meta-clip {
@@ -3611,7 +3541,6 @@
         .packing-resumen:not(.is-empty) {
             position: relative;
             padding: clamp(8px, 2.5vw, 10px) clamp(10px, 3vw, 12px) clamp(12px, 3.5vw, 14px) clamp(14px, 4vw, 16px);
-            padding-bottom: clamp(14px, 4vw, 18px);
         }
 
         .packing-resumen.is-collapsed:not(.is-empty) {
@@ -3640,6 +3569,72 @@
 
         .packing-chips-panel.is-collapsed .packing-chips-box {
             display: none !important;
+        }
+
+        /* Botón registro: posición según estado (medida real del bloque, no px fijos) */
+        .packing-meta-shell .packing-resumen-fold-btn {
+            position: absolute;
+            right: clamp(-0.79rem, -4.5vw, -1.2rem);
+            bottom: clamp(0.6rem, 2.5vw, 0.875rem);
+            top: auto;
+            z-index: 150;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: clamp(34px, 9.5vw, 38px);
+            height: clamp(34px, 9.5vw, 38px);
+            margin: 0;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(180deg, #0d9488 0%, #0f766e 100%);
+            color: #fff;
+            cursor: pointer;
+            pointer-events: auto;
+            -webkit-tap-highlight-color: transparent;
+            box-shadow: 0 6px 18px rgba(15, 118, 110, 0.42);
+        }
+
+        /* Colapsado: junto al borde inferior de fecha/muestra */
+        .packing-meta-shell.is-fold-btn-compact .packing-resumen-fold-btn {
+            bottom: auto;
+            top: calc(var(--pk-select-end, 5.5rem) - 1.10rem);
+        }
+
+        /* Abierto con chips: abajo-derecha del card */
+        .packing-meta-shell.is-fold-btn-expanded .packing-resumen-fold-btn {
+            top: 90%;
+            bottom: clamp(0.6rem, 2.5vw, 0.875rem);
+        }
+
+        .packing-meta-shell .packing-resumen-fold-btn[hidden] {
+            display: none !important;
+        }
+
+        .packing-resumen-fold-btn:disabled,
+        .packing-resumen-fold-btn.is-loading-blocked {
+            pointer-events: none;
+            opacity: 0.5;
+            cursor: wait;
+            filter: grayscale(0.2);
+        }
+
+        .packing-resumen-fold-btn:active {
+            transform: scale(0.96);
+        }
+
+        .packing-resumen-fold-btn.is-active,
+        .packing-meta-shell:has(.packing-resumen.is-collapsed) .packing-resumen-fold-btn {
+            background: linear-gradient(180deg, #14b8a6 0%, #0d9488 100%);
+        }
+
+        .packing-resumen-fold-btn i,
+        .packing-resumen-fold-btn svg {
+            width: clamp(17px, 4.8vw, 20px);
+            height: clamp(17px, 4.8vw, 20px);
+            color: #fff;
+            pointer-events: none;
         }
 
         .meta-inp[type="date"] {
