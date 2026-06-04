@@ -7,8 +7,8 @@
             --text: #1E293B;
             --success: #22C55E;
             --border: #E2E8F0;
-            /* Mínimo 12px: Android/Chrome suele dar safe-area 0 aunque haya barra de gestos */
-            --nav-safe-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+            /* Mínimo 6px: separación suave sobre barra de gestos (Android suele dar safe-area 0) */
+            --nav-safe-bottom: max(6px, env(safe-area-inset-bottom, 0px));
             --nav-bar-total: calc(56px + var(--nav-safe-bottom));
         }
 
