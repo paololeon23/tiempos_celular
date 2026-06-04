@@ -2,12 +2,20 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="application-name" content="Muestras Web">
+    <meta name="apple-mobile-web-app-title" content="Muestras Web">
     <meta name="theme-color" content="#164C7C">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no, date=no, email=no, address=no">
     <title>Packing</title>
+    <link rel="icon" href="../log.png" type="image/png">
     <link rel="icon" href="../icons/icon-32.png" type="image/png" sizes="32x32">
-    <link rel="stylesheet" href="../styles.css?v=53">
+    <link rel="apple-touch-icon" href="../log.png">
+    <link rel="manifest" href="../manifest.json">
+    <link rel="stylesheet" href="../styles.css?v=62">
 </head>
 <body class="packing-page">
 
@@ -94,7 +102,10 @@
             <div class="control-equitativo-bar packing-hora-bar">
                 <div class="control-equitativo-label">
                     <b>Hora inicio recep.</b>
-                    <span>Hora de recepción en packing</span>
+                    <span>Datos importantes en packing</span>
+                </div>
+                <div class="packing-hora-responsable-wrap">
+                    <input class="packing-responsable-inp" id="packing-responsable" name="responsable" type="text" placeholder="Responsable" enterkeyhint="done" autocomplete="name" aria-label="Responsable" disabled>
                 </div>
                 <div class="control-equitativo-actions">
                     <input class="control-equitativo-btn packing-hora-inicio-inp" id="packing-hora-inicio" name="hora_inicio" type="time" enterkeyhint="done" aria-label="Hora inicio recepción">
@@ -135,7 +146,7 @@
                 <i data-lucide="trash-2"></i>
             </button>
         </div>
-        <button type="button" class="fab-mini fab-mini--registro" id="fab-packing-demo" aria-label="Datos de prueba packing" title="Rellena pesos y tiempos de ejemplo en el clamshell actual">
+        <button type="button" class="fab-mini fab-mini--registro" id="fab-packing-demo" aria-label="Datos de prueba packing" title="Simula pesos, tiempos y control equitativo según el total de clamshells del servidor">
             <i data-lucide="flask-conical"></i>
         </button>
         <button type="button" class="packing-agregar-fab" id="fab-packing-agregar" aria-label="Agregar clamshell" title="Seleccionar muestra para continuar por favor">
@@ -182,6 +193,7 @@
                     <input type="number" id="pk-inp-peso-sal-pre" step="0.1" value="0" enterkeyhint="done" inputmode="decimal">
                 </div>
             </div>
+            <div id="packing-pesos-alert" class="metric-inline-alert" style="display:none;"></div>
             <button class="btn-save" type="button" id="packing-pesos-guardar">GUARDAR REGISTRO</button>
         </div>
     </div>
@@ -212,10 +224,35 @@
                     <label for="pk-tiempo-salida-pre">Salida prefrío</label>
                     <input class="packing-tiempo-inp" id="pk-tiempo-salida-pre" name="salida_prefrio" type="time" enterkeyhint="done" aria-label="Salida prefrío" disabled>
                 </div>
+                <div id="packing-tiempos-alert" class="metric-inline-alert" style="display:none;"></div>
             </div>
             <div class="metric-modal-foot">
                 <button class="btn-secondary" type="button" id="packing-tiempos-cancel">Cancelar</button>
                 <button class="btn-save" type="button" id="packing-tiempos-guardar">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay is-readonly-view" id="packing-presion-modal-overlay" aria-hidden="true">
+        <div class="modal-content">
+            <h2 id="packing-presion-modal-title">Presión vapor</h2>
+            <div class="metric-modal-body" id="packing-presion-modal-body"></div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" id="packing-presion-cancel">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="packing-observation-modal-overlay" aria-hidden="true">
+        <div class="modal-content">
+            <h2 id="packing-observation-modal-title" style="margin-bottom: 16px; color: var(--primary);">Observación</h2>
+            <div class="form-group">
+                <label for="packing-visual-observation">OBSERVACIÓN DEL CLAMSHELL</label>
+                <input type="text" id="packing-visual-observation" placeholder="Opcional: incidencia, comentario, condición de packing" enterkeyhint="done">
+            </div>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" id="packing-observation-cancel">Cancelar</button>
+                <button class="btn-save" type="button" id="packing-observation-guardar">Guardar</button>
             </div>
         </div>
     </div>
@@ -277,9 +314,10 @@
         </div>
     </div>
 
+    <script src="../script.js"></script>
     <script src="../librerias/lucide.min.js"></script>
     <script src="../librerias/sweetalert2.all.min.js"></script>
     <script src="../time-picker.js"></script>
-    <script src="./packing.js?v=54"></script>
+    <script src="./packing.js?v=78"></script>
 </body>
 </html>

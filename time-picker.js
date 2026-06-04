@@ -68,6 +68,7 @@
         const scope = root || document;
         scope.querySelectorAll('input[type="time"], input.fp-input-time').forEach((input) => {
             if (input.dataset.tpReady === '1') return;
+            if (input.dataset.tiemposNoPicker === '1') return;
             if (input.type !== 'time') input.classList.add('fp-input-time');
             input.type = 'text';
             input.readOnly = true;

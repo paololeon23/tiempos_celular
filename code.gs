@@ -761,6 +761,8 @@ function doPostPacking(sheet, data) {
     var horaRecepcion = (data.hora_recepcion != null && data.hora_recepcion !== '') ? String(data.hora_recepcion).trim() : '';
     var nViaje = (data.n_viaje != null && data.n_viaje !== '') ? String(data.n_viaje).trim() : '';
     var packingRows = data.packingRows || [];
+    var packingStartIndex = Number(data.packing_start_index);
+    if (!Number.isFinite(packingStartIndex) || packingStartIndex < 0) packingStartIndex = 0;
 
     if (!fecha || !ensayoNumero) {
       return { ok: false, error: 'Faltan fecha o ensayo_numero' };
@@ -797,9 +799,11 @@ function doPostPacking(sheet, data) {
         var startColMerge = PACKING_START_COL;
         var colsPorFilaMerge = 4 + 36;
         var baseHeadersMerge = ['FECHA_INSPECCION', 'RESPONSABLE', 'HORA_RECEPCION', 'N_VIAJE'].concat(getPackingHeaderNamesPerRow());
-        for (var pm = 0; pm < packingRows.length && pm < rowIndices.length; pm++) {
+        for (var pm = 0; pm < packingRows.length; pm++) {
+          var filaIdxMerge = packingStartIndex + pm;
+          if (filaIdxMerge >= rowIndices.length) break;
           var rowMerge = packingRows[pm];
-          var filaHojaMerge = rowIndices[pm];
+          var filaHojaMerge = rowIndices[filaIdxMerge];
           var valoresMerge = [fechaInspeccion, responsable, horaRecepcion, nViaje];
           if (Array.isArray(rowMerge)) {
             for (var jm = 0; jm < 36; jm++) {
@@ -845,9 +849,11 @@ function doPostPacking(sheet, data) {
     var baseHeaders = ['FECHA_INSPECCION', 'RESPONSABLE', 'HORA_RECEPCION', 'N_VIAJE'].concat(getPackingHeaderNamesPerRow());
 
     if (guardarPacking) {
-      for (var i = 0; i < packingRows.length && i < rowIndices.length; i++) {
+      for (var i = 0; i < packingRows.length; i++) {
+        var filaIdx = packingStartIndex + i;
+        if (filaIdx >= rowIndices.length) break;
         var row = packingRows[i];
-        var filaHoja = rowIndices[i];
+        var filaHoja = rowIndices[filaIdx];
         var valores = [fechaInspeccion, responsable, horaRecepcion, nViaje];
         if (Array.isArray(row)) {
           for (var j = 0; j < 36; j++) {

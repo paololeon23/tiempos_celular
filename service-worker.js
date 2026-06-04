@@ -1,4 +1,4 @@
-const SW_VERSION = 'v51';
+const SW_VERSION = 'v73';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 80;
@@ -16,6 +16,7 @@ const APP_SHELL = [
     './librerias/flatpickr.min.css',
     './librerias/flatpickr-l10n-es.js',
     './manifest.json',
+    './log.png',
     './icons/icon-32.png',
     './icons/icon-192.png',
     './icons/icon-512.png',

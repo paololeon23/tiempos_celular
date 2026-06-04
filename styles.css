@@ -11,17 +11,24 @@
 
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, sans-serif; }
 
-        body { background-color: var(--bg); color: var(--text); padding-bottom: 56px; }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            padding-bottom: 56px;
+            overscroll-behavior-y: none;
+        }
 
-        /* Header Profesional con Degradado */
+        /* Header fijo al scroll (Safari + resto) */
         header {
             background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            padding: 25px 20px;
+            padding: max(25px, env(safe-area-inset-top, 0px)) 20px 25px;
             border-radius: 0 0 30px 30px;
             box-shadow: 0 8px 20px rgba(22, 76, 124, 0.15);
+            position: -webkit-sticky;
             position: sticky;
             top: 0;
-            z-index: 100;
+            z-index: 1000;
+            width: 100%;
             color: white;
         }
 
@@ -2980,6 +2987,52 @@
 
         .packing-hora-bar {
             margin-bottom: 14px;
+            gap: clamp(6px, 2vw, 10px);
+        }
+
+        .packing-hora-bar .control-equitativo-label {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 38%;
+        }
+
+        .packing-hora-responsable-wrap {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+
+        .packing-responsable-inp {
+            width: 100%;
+            height: 42px;
+            padding: 0 10px;
+            border: 1px solid #D8E3EE;
+            border-radius: 12px;
+            background: #F8FAFC;
+            font-size: clamp(12px, 3.2vw, 14px);
+            font-weight: 700;
+            color: var(--primary);
+            text-align: center;
+            min-width: 0;
+        }
+
+        .packing-responsable-inp::placeholder {
+            color: #94a3b8;
+            font-weight: 600;
+        }
+
+        .packing-responsable-inp:focus {
+            outline: none;
+            border-color: rgba(22, 76, 124, 0.35);
+            background: #f0f7ff;
+        }
+
+        #packing-hora-row.is-disabled .packing-responsable-inp {
+            opacity: 0.55;
+            cursor: not-allowed;
+            pointer-events: none;
+            color: #94a3b8;
+            background: #f8fafc;
+            border-color: #d8e3ee;
         }
 
         #packing-hora-row.is-disabled .packing-hora-inicio-inp,
@@ -3119,8 +3172,8 @@
         .packing-hora-inicio-inp.fp-input-time {
             flex: 0 0 auto;
             width: 88px;
-            min-width: 88px;
-            max-width: 88px;
+            min-width: 50px;
+            max-width: 60px;
             height: 42px;
             padding: 0 8px;
             font-size: 14px;
@@ -3338,9 +3391,12 @@
         }
 
         .packing-card-sub {
+            display: block;
             font-size: 11px;
             color: #64748b;
             font-weight: 600;
+            line-height: 1.3;
+            word-break: break-word;
         }
 
         .packing-peso-recep-btn {
@@ -3496,6 +3552,44 @@
             cursor: not-allowed;
         }
 
+        /* Solo lectura (clamshell #2+): mismo aspecto que Campo — inputs disabled grises */
+        #packing-tiempos-modal-overlay.is-readonly-view .form-group input,
+        #packing-tiempos-modal-overlay.is-readonly-view .form-group input.packing-tiempo-inp,
+        #packing-tiempos-modal-overlay.is-readonly-view .packing-tiempo-inp:disabled,
+        #packing-tiempos-modal-overlay.is-readonly-view .packing-tiempo-inp.fp-input-time:disabled {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            font-size: 16px;
+            outline: none;
+            opacity: 1;
+            cursor: not-allowed;
+            pointer-events: none;
+            background-color: #eceff3;
+            color: #64748b;
+            -webkit-text-fill-color: #64748b;
+            font-weight: 400;
+            text-align: center;
+            box-shadow: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        #packing-tiempos-modal-overlay.is-readonly-view .form-group input.is-empty-time-display:disabled,
+        #packing-tiempos-modal-overlay.is-readonly-view .packing-tiempo-inp.is-empty-time-display:disabled {
+            color: #94a3b8;
+            -webkit-text-fill-color: #94a3b8;
+        }
+
+        #packing-tiempos-modal-overlay.is-readonly-view .form-group input:focus,
+        #packing-tiempos-modal-overlay.is-readonly-view .packing-tiempo-inp:focus,
+        #packing-tiempos-modal-overlay.is-readonly-view .packing-tiempo-inp.fp-input-time:focus {
+            outline: none;
+            border-color: var(--border);
+            background-color: #eceff3;
+        }
+
         #packing-tiempos-modal-overlay .packing-tiempo-inp::placeholder,
         #packing-tiempos-modal-overlay .packing-tiempo-inp.fp-input-time::placeholder {
             color: #94a3b8;
@@ -3517,6 +3611,52 @@
                 padding: 12px 8px;
                 font-size: 15px;
             }
+        }
+
+        #packing-presion-modal-overlay .packing-tiempos-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-rows: auto auto;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        #packing-presion-modal-overlay .packing-tiempos-grid .form-group,
+        #packing-presion-modal-overlay .packing-tiempo-row-full {
+            margin-bottom: 0;
+            min-width: 0;
+        }
+
+        #packing-presion-modal-overlay .packing-tiempos-grid .form-group label,
+        #packing-presion-modal-overlay .packing-tiempo-row-full label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.25;
+            margin-bottom: 5px;
+        }
+
+        #packing-presion-modal-overlay #packing-presion-modal-title {
+            margin-bottom: 16px;
+            color: var(--primary);
+        }
+
+        #packing-presion-modal-overlay .form-group input,
+        #packing-presion-modal-overlay .form-group select {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            font-size: 16px;
+            outline: none;
+            text-align: center;
+            background: #eceff3;
+        }
+
+        #packing-presion-modal-overlay .form-group input:disabled {
+            opacity: 1;
+            cursor: default;
         }
 
         body.packing-page header {
@@ -3855,5 +3995,66 @@
         @media (max-width: 520px) {
             .packing-select-row {
                 gap: clamp(8px, 2.5vw, 12px);
+            }
+        }
+
+        /* ========== Comportamiento app nativa (móvil / PWA) ========== */
+        html {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+            overscroll-behavior: none;
+            height: 100%;
+        }
+
+        html,
+        body {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            min-height: 100%;
+            min-height: 100dvh;
+        }
+
+        a,
+        button,
+        label,
+        .nav-btn,
+        .metric-btn,
+        .fab-mini,
+        .packing-agregar-fab {
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        /*
+         * iOS Safari hace zoom al enfocar si el texto del input es < 16px.
+         * Viewport user-scalable=no no basta; esto sí evita el zoom.
+         */
+        @media screen and (max-width: 900px) {
+            input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]),
+            select,
+            textarea,
+            .meta-inp,
+            .header-tipo-select,
+            .packing-cg-inp,
+            .packing-responsable-inp,
+            .packing-hora-inicio-inp,
+            .packing-tiempo-inp,
+            .fp-input-time,
+            .flatpickr-time input,
+            .time-picker-value {
+                font-size: 16px !important;
+            }
+        }
+
+        @media (display-mode: standalone) {
+            body {
+                padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+            }
+
+            #main-bottom-nav {
+                padding-bottom: env(safe-area-inset-bottom, 0px);
             }
         }
