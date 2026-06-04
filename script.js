@@ -39,7 +39,6 @@
         'librerias/flatpickr.min.js',
         'librerias/flatpickr.min.css',
         'librerias/flatpickr-l10n-es.js',
-        'appagv.png',
         'log.png'
     ];
 

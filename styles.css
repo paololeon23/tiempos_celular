@@ -7,6 +7,9 @@
             --text: #1E293B;
             --success: #22C55E;
             --border: #E2E8F0;
+            /* Mínimo 12px: Android/Chrome suele dar safe-area 0 aunque haya barra de gestos */
+            --nav-safe-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+            --nav-bar-total: calc(56px + var(--nav-safe-bottom));
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, sans-serif; }
@@ -14,7 +17,7 @@
         body {
             background-color: var(--bg);
             color: var(--text);
-            padding-bottom: 56px;
+            padding-bottom: var(--nav-bar-total);
             overscroll-behavior-y: none;
         }
 
@@ -2680,12 +2683,20 @@
         }
 
         /* Nav & Fab */
-        nav {
-            position: fixed; bottom: 0; width: 100%;
-            background: var(--white); display: flex;
-            justify-content: space-around; padding: 12px 0 14px;
+        nav,
+        #main-bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            max-width: 100%;
+            background: var(--white);
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 4px calc(10px + var(--nav-safe-bottom));
             box-shadow: 0 -5px 20px rgba(0,0,0,0.05);
             border-top: 1px solid var(--border);
+            z-index: 900;
         }
 
         .nav-btn { color: #94A3B8; font-size: 26px; cursor: pointer; }
@@ -2704,10 +2715,15 @@
             height: 24px;
         }
         .nav-link span {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
-            line-height: 1;
-            letter-spacing: 0.02em;
+            line-height: 1.1;
+            letter-spacing: 0.01em;
+            text-align: center;
+            max-width: 72px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .fab-icon-svg {
@@ -2723,7 +2739,7 @@
 
         .fab-menu {
             position: fixed;
-            bottom: 82px;
+            bottom: calc(var(--nav-bar-total) + 26px);
             right: 20px !important;
             display: flex;
             flex-direction: column;
@@ -2947,7 +2963,7 @@
 
         /* Historial / Recomendaciones: mismo header que Campo y Packing */
         body.modulo-aux-page {
-            padding-bottom: 56px;
+            padding-bottom: var(--nav-bar-total);
         }
 
         .modulo-header-desc {
@@ -3229,7 +3245,7 @@
         }
 
         body.packing-page {
-            padding-bottom: 78px;
+            padding-bottom: calc(var(--nav-bar-total) + 22px);
         }
 
         #packing-main.container {
@@ -4308,15 +4324,6 @@
             }
         }
 
-        @media (display-mode: standalone) {
-            body {
-                padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-            }
-
-            #main-bottom-nav {
-                padding-bottom: env(safe-area-inset-bottom, 0px);
-            }
-        }
 
         /* Nube de aviso: llenado Campo completo para la fecha */
         .campo-nube-aviso {
