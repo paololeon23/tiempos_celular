@@ -353,26 +353,15 @@
         if (elEnvioBarPacking) {
             elEnvioBarPacking.classList.toggle('is-disabled', !muestraSeleccionada());
         }
-        actualizarAvisoCompletitudPacking(baseOk);
-    }
-
-    function actualizarAvisoCompletitudPacking(baseOk) {
-        if (!elStatus || !baseOk || envioPackingEnCurso) return;
-        const v = validarCompletitudPackingParaEnvio();
-        if (v.ok) {
-            if (elStatus.dataset.pkCompletitudHint === '1') {
+        if (elStatus?.dataset.pkCompletitudHint === '1' && baseOk && !envioPackingEnCurso) {
+            const v = validarCompletitudPackingParaEnvio();
+            if (v.ok) {
                 elStatus.hidden = true;
                 elStatus.textContent = '';
                 delete elStatus.dataset.pkCompletitudHint;
+                syncPackingFoldBtnAnchor();
             }
-            return;
         }
-        const msg = v.errores[0] || 'Completa todos los datos de packing antes de enviar.';
-        elStatus.textContent = msg;
-        elStatus.className = 'packing-status-msg packing-status-msg--warn';
-        elStatus.hidden = false;
-        elStatus.dataset.pkCompletitudHint = '1';
-        syncPackingFoldBtnAnchor();
     }
 
     function textoPesoCard(g) {
@@ -744,6 +733,17 @@
         quitarFocoModalPacking(overlayEl);
         overlayEl.style.display = 'none';
         overlayEl.setAttribute('aria-hidden', 'true');
+    }
+
+    /** Clic en el fondo oscuro (fuera del panel) cierra sin guardar. */
+    function bindCerrarModalAlClickFueraPacking(overlayEl, onDismiss) {
+        if (!overlayEl || overlayEl.dataset.dismissBound === '1') return;
+        overlayEl.dataset.dismissBound = '1';
+        overlayEl.addEventListener('click', (e) => {
+            const panel = overlayEl.querySelector('.modal-content, .time-picker-modal');
+            if (panel && panel.contains(e.target)) return;
+            onDismiss();
+        });
     }
 
     function abrirModalPesosPacking(cardId) {
@@ -2422,6 +2422,33 @@
         return lista;
     }
 
+    function muestrasOfflineDesdeBorradorPacking(fechaIso) {
+        const fecha = normalizarFechaIso(fechaIso);
+        if (!fecha) return [];
+        const store = leerStoreBorradorPacking();
+        const lista = [];
+        const visto = new Set();
+        Object.keys(store.porClave || {}).forEach((key) => {
+            if (!key.startsWith(fecha + '::')) return;
+            const raw = key.slice(fecha.length + 2);
+            if (!raw || visto.has(raw)) return;
+            visto.add(raw);
+            const partes = raw.split('|');
+            const num = String(partes[0] || '').trim();
+            const en = String(partes[1] || '').trim();
+            const borrador = store.porClave[key];
+            lista.push({
+                num_muestra: num || String(borrador?.meta?.num_muestra || '').trim(),
+                ensayo_numero: en || String(borrador?.meta?.ensayo_numero || '').trim()
+            });
+        });
+        return lista.filter((m) => m.num_muestra || m.ensayo_numero).sort((a, b) => {
+            const na = Number(a.ensayo_numero) || 0;
+            const nb = Number(b.ensayo_numero) || 0;
+            return na - nb || String(a.num_muestra).localeCompare(String(b.num_muestra));
+        });
+    }
+
     async function fetchMuestrasPorFecha(fechaIso) {
         const r = await callbackJsonp({
             listado_muestras_fecha: '1',
@@ -2593,8 +2620,16 @@
         limpiarPreview();
 
         if (!navigator.onLine) {
-            setStatus('Sin internet. Conéctate para cargar muestras.', 'warn');
-            resetMuestraSelect('Sin conexión', true);
+            const listaLocal = muestrasOfflineDesdeBorradorPacking(fecha);
+            if (listaLocal.length) {
+                poblarSelectMuestra(listaLocal);
+                restaurarMuestraActivaDesdeBorrador();
+                setStatus('Sin internet: muestras recuperadas del borrador local.', 'warn');
+                if (elStatus) elStatus.hidden = false;
+            } else {
+                setStatus('Sin internet. No hay borradores guardados para esta fecha.', 'warn');
+                resetMuestraSelect('Sin conexión', true);
+            }
             return;
         }
 
@@ -2703,7 +2738,13 @@
     elFabOptionsBtn?.addEventListener('click', () => {
         establecerMenuFlotantePacking(!elFabMenu?.classList.contains('is-open'));
     });
-    document.getElementById('fab-packing-sync')?.addEventListener('click', () => void sincronizarConPlanillaPacking());
+    document.getElementById('fab-packing-sync')?.addEventListener('click', () => {
+        if (typeof window.actualizarAppCompletoDesdeFab === 'function') {
+            void window.actualizarAppCompletoDesdeFab();
+        } else {
+            void sincronizarConPlanillaPacking();
+        }
+    });
     document.getElementById('fab-packing-borrar')?.addEventListener('click', () => void borrarTodoYCachePacking());
     elFabAgregar?.addEventListener('click', onFabAgregarPackingClick);
     elBtnEnviarPacking?.addEventListener('click', () => void guardarRegistroYEnviarDesdePantallaPacking());
@@ -2749,10 +2790,10 @@
         abrirModalPesosPacking(Number(cardEl.dataset.cardId));
     });
 
+    const elPesosCancel = document.getElementById('packing-pesos-cancel');
+    elPesosCancel?.addEventListener('click', cerrarModalPesosPacking);
     elPesosGuardar?.addEventListener('click', guardarModalPesosPacking);
-    elPesosModal?.addEventListener('click', (e) => {
-        if (e.target === elPesosModal) cerrarModalPesosPacking();
-    });
+    bindCerrarModalAlClickFueraPacking(elPesosModal, cerrarModalPesosPacking);
 
     elCardsWrap?.addEventListener('click', (ev) => {
         const tiempoBtn = ev.target.closest('.packing-metric-tiempo-open-btn');
@@ -2784,28 +2825,20 @@
     });
     elTiemposCancel?.addEventListener('click', () => cerrarTiemposMuestra(true));
     elTiemposGuardar?.addEventListener('click', guardarTiemposMuestra);
-    elTiemposModal?.addEventListener('click', (e) => {
-        if (e.target === elTiemposModal) cerrarTiemposMuestra(true);
-    });
+    bindCerrarModalAlClickFueraPacking(elTiemposModal, () => cerrarTiemposMuestra(true));
 
     elPresionCancel?.addEventListener('click', cerrarModalPresionPacking);
-    elPresionModal?.addEventListener('click', (e) => {
-        if (e.target === elPresionModal) cerrarModalPresionPacking();
-    });
+    bindCerrarModalAlClickFueraPacking(elPresionModal, cerrarModalPresionPacking);
 
     elObsCancel?.addEventListener('click', cerrarModalObservacionPacking);
     elObsGuardar?.addEventListener('click', guardarModalObservacionPacking);
-    elObsModal?.addEventListener('click', (e) => {
-        if (e.target === elObsModal) cerrarModalObservacionPacking();
-    });
+    bindCerrarModalAlClickFueraPacking(elObsModal, cerrarModalObservacionPacking);
 
     elBtnTempPacking?.addEventListener('click', () => abrirModalControlGlobalPacking('temperatura'));
     elBtnHumPacking?.addEventListener('click', () => abrirModalControlGlobalPacking('humedad'));
     elControlCancelPacking?.addEventListener('click', cerrarModalControlGlobalPacking);
     elControlGuardarPacking?.addEventListener('click', guardarModalControlGlobalPacking);
-    elControlModalPacking?.addEventListener('click', (e) => {
-        if (e.target === elControlModalPacking) cerrarModalControlGlobalPacking();
-    });
+    bindCerrarModalAlClickFueraPacking(elControlModalPacking, cerrarModalControlGlobalPacking);
 
     PACKING_PESO_CAMPOS.forEach((c) => {
         const inp = document.getElementById(c.inpId);
@@ -2933,6 +2966,14 @@
     });
 
     if (!navigator.onLine) {
-        setStatus('Sin internet. Conéctate para cargar datos de la planilla.', 'warn');
+        const fechaOff = normalizarFechaIso(elFecha?.value);
+        const listaOff = fechaOff ? muestrasOfflineDesdeBorradorPacking(fechaOff) : [];
+        if (listaOff.length) {
+            poblarSelectMuestra(listaOff);
+            restaurarMuestraActivaDesdeBorrador();
+            setStatus('Sin internet: trabajando con borrador local.', 'warn');
+        } else {
+            setStatus('Sin internet. Puedes seguir si ya guardaste un borrador de muestra.', 'warn');
+        }
     }
 }());

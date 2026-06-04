@@ -51,6 +51,7 @@
         const SYNC_MAX_HISTORY = 80;
         const NUM_MUESTRA_MAX_LEN = 8;
         const REGISTRADOS_HOY_CACHE_KEY = 'tiempos-registrados-hoy-cache-v1';
+        const CAMPO_LLENADO_COMPLETO_AVISO_KEY = 'tiempos-campo-llenado-completo-aviso-v1';
         const NUM_MUESTRA_USADOS_KEY = 'tiempos-num-muestra-usados-v1';
         /** Claves viejas de N° muestra en localStorage (no se usan; solo se borran al iniciar). */
         const NUM_MUESTRA_LS_KEYS_A_PURGAR = [
@@ -447,6 +448,85 @@
             el.style.opacity = '1';
             clearTimeout(el.__hideTimer);
             el.__hideTimer = setTimeout(() => { el.style.opacity = '0'; }, Math.max(1200, ms));
+        }
+
+        function etiquetaFechaCampoParaAviso() {
+            const day = String(document.getElementById('fecha-ring-day')?.textContent || '').trim();
+            const month = String(document.getElementById('fecha-ring-month')?.textContent || '').trim();
+            if (day && month && day !== '--') return `${day} ${month}`;
+            return hoyIsoLocal();
+        }
+
+        /** Todas las muestras del selector (1–5) ya registradas hoy en planilla/cola. */
+        function todasMuestrasCampoRegistradasHoy() {
+            const sel = document.getElementById('visual-meta-muestra');
+            if (!sel) return false;
+            const opciones = [...sel.options].filter((o) => String(o.value || '').trim());
+            if (!opciones.length) return false;
+            return opciones.every((op) => {
+                const num = numeroDesdeEnsayoTexto(op.value);
+                return !!(num && ensayoNumeroRegistradoHoy(String(num)));
+            });
+        }
+
+        function yaMostroAvisoLlenadoCompletoCampo(fechaClave) {
+            try {
+                const raw = localStorage.getItem(CAMPO_LLENADO_COMPLETO_AVISO_KEY);
+                if (!raw) return false;
+                const parsed = JSON.parse(raw);
+                return String(parsed?.fecha || '') === String(fechaClave || '');
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function marcarAvisoLlenadoCompletoCampoMostrado(fechaClave) {
+            try {
+                localStorage.setItem(
+                    CAMPO_LLENADO_COMPLETO_AVISO_KEY,
+                    JSON.stringify({ fecha: String(fechaClave || ''), at: Date.now() })
+                );
+            } catch (_) { /* ignore */ }
+        }
+
+        function mostrarNubeAvisoLlenadoCompletoCampo() {
+            const fechaClave = hoyIsoLocal();
+            if (yaMostroAvisoLlenadoCompletoCampo(fechaClave)) return;
+            if (document.getElementById('campo-nube-llenado-completo')) return;
+
+            const fechaEtiqueta = etiquetaFechaCampoParaAviso();
+            const el = document.createElement('div');
+            el.id = 'campo-nube-llenado-completo';
+            el.className = 'campo-nube-aviso';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            el.innerHTML = `
+                <div class="campo-nube-aviso__inner">
+                    <p class="campo-nube-aviso__titulo">¡Listo!</p>
+                    <p class="campo-nube-aviso__texto">Se terminó el llenado para esta fecha (${fechaEtiqueta}). Gracias por tu comprensión.</p>
+                    <button type="button" class="campo-nube-aviso__cerrar">Entendido</button>
+                </div>
+            `;
+            document.body.appendChild(el);
+            marcarAvisoLlenadoCompletoCampoMostrado(fechaClave);
+
+            requestAnimationFrame(() => el.classList.add('is-visible'));
+
+            const cerrar = () => {
+                el.classList.remove('is-visible');
+                el.classList.add('is-hiding');
+                setTimeout(() => {
+                    try { el.remove(); } catch (_) { /* ignore */ }
+                }, 320);
+            };
+            el.querySelector('.campo-nube-aviso__cerrar')?.addEventListener('click', cerrar);
+            clearTimeout(el.__autoHideTimer);
+            el.__autoHideTimer = setTimeout(cerrar, 16000);
+        }
+
+        function evaluarAvisoLlenadoCompletoCampo() {
+            if (!todasMuestrasCampoRegistradasHoy()) return;
+            mostrarNubeAvisoLlenadoCompletoCampo();
         }
 
         function valorCampoRequerido(id) {
@@ -1649,6 +1729,7 @@
                     mostrarToast('info', 'Muestra no disponible', 'Ese ensayo ya está registrado y fue bloqueado.');
                 }
             }
+            setTimeout(evaluarAvisoLlenadoCompletoCampo, 80);
         }
 
         async function refrescarBloqueoMuestrasEnTiempoReal(forceServer = false) {
@@ -2008,6 +2089,31 @@
             actualizarHeaderConexionUI();
         }
 
+        const elFechaRingWidgetCampo = document.getElementById('visual-fecha-ring-widget');
+        const elFechaRingCircleCampo = document.getElementById('campo-fecha-ring-circle');
+        const elFechaRingPopoverCampo = document.getElementById('campo-fecha-ring-popover');
+
+        function mensajeFechaRingCampo(d) {
+            const mesLargo = new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(d);
+            const dia = d.getDate();
+            const diasMes = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+            if (dia <= 7) {
+                return mesLargo + ' recién comenzó — día ' + dia + ' de ' + diasMes;
+            }
+            return 'Estamos en ' + mesLargo + ' — día ' + dia + ' de ' + diasMes;
+        }
+
+        function actualizarArcoFechaRingCampo(d) {
+            if (!elFechaRingCircleCampo) return;
+            const dia = d.getDate();
+            const diasMes = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+            const progreso = Math.min(1, Math.max(0, dia / diasMes));
+            const arcoDeg = Math.round(70 * progreso);
+            const corte = 280 - arcoDeg;
+            elFechaRingCircleCampo.style.background = 'conic-gradient(from 210deg, rgba(22, 76, 124, 0.18) 0deg '
+                + corte + 'deg, rgba(29, 78, 137, 0.92) ' + corte + 'deg 360deg)';
+        }
+
         function actualizarFechaRing() {
             const dayEl = document.getElementById('fecha-ring-day');
             const monthEl = document.getElementById('fecha-ring-month');
@@ -2017,6 +2123,23 @@
             const mes = new Intl.DateTimeFormat('es-ES', { month: 'short' }).format(now).replace('.', '');
             const anio = now.getFullYear();
             monthEl.textContent = `${mes} ${anio}`.toUpperCase();
+            const msg = mensajeFechaRingCampo(now);
+            if (elFechaRingPopoverCampo && !elFechaRingWidgetCampo?.classList.contains('is-popover-open')) {
+                elFechaRingPopoverCampo.textContent = msg;
+            }
+            if (elFechaRingWidgetCampo) elFechaRingWidgetCampo.title = msg;
+            actualizarArcoFechaRingCampo(now);
+        }
+
+        function togglePopoverFechaRingCampo(forceOpen) {
+            if (!elFechaRingWidgetCampo || !elFechaRingPopoverCampo) return;
+            const abrir = forceOpen === true
+                ? true
+                : (forceOpen === false ? false : !elFechaRingWidgetCampo.classList.contains('is-popover-open'));
+            const d = new Date();
+            elFechaRingPopoverCampo.textContent = mensajeFechaRingCampo(d);
+            elFechaRingWidgetCampo.classList.toggle('is-popover-open', abrir);
+            elFechaRingPopoverCampo.hidden = !abrir;
         }
 
         let fechaRingTimer = null;
@@ -2028,6 +2151,16 @@
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) actualizarFechaRing();
             });
+            elFechaRingWidgetCampo?.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                togglePopoverFechaRingCampo();
+            });
+            elFechaRingWidgetCampo?.addEventListener('keydown', (ev) => {
+                if (ev.key !== 'Enter' && ev.key !== ' ') return;
+                ev.preventDefault();
+                togglePopoverFechaRingCampo();
+            });
+            document.addEventListener('click', () => togglePopoverFechaRingCampo(false));
         }
 
         function obtenerMetaEnsayo(ensayo) {
@@ -5599,7 +5732,30 @@
         }
 
         function cerrarModalObservacion() {
+            const item = data.find((entry) => entry.id === observationModalState.itemId);
+            const inp = document.getElementById('visual-observation');
+            if (item && inp) inp.value = item.observacion || '';
             document.getElementById('observation-modal-overlay').style.display = 'none';
+        }
+
+        function bindCerrarModalAlClickFueraCampo(overlayEl, onDismiss) {
+            if (!overlayEl || overlayEl.dataset.dismissBound === '1') return;
+            overlayEl.dataset.dismissBound = '1';
+            overlayEl.addEventListener('click', (e) => {
+                const panel = overlayEl.querySelector('.modal-content, .time-picker-modal');
+                if (panel && panel.contains(e.target)) return;
+                onDismiss();
+            });
+        }
+
+        function initCerrarModalesCampo() {
+            bindCerrarModalAlClickFueraCampo(document.getElementById('modal-overlay'), cerrarModal);
+            bindCerrarModalAlClickFueraCampo(document.getElementById('metric-modal-overlay'), cerrarModalMetrica);
+            bindCerrarModalAlClickFueraCampo(document.getElementById('observation-modal-overlay'), cerrarModalObservacion);
+            bindCerrarModalAlClickFueraCampo(document.getElementById('essential-modal-overlay'), cerrarModalResumen);
+            bindCerrarModalAlClickFueraCampo(document.getElementById('control-global-modal-overlay'), cerrarModalControlGlobal);
+            bindCerrarModalAlClickFueraCampo(document.getElementById('llenado-horas-modal-overlay'), cerrarModalHorasLlenado);
+            bindCerrarModalAlClickFueraCampo(document.getElementById('time-picker-modal-overlay'), cerrarTimePickerPersonalizado);
         }
 
         function guardarModalObservacion() {
@@ -6099,16 +6255,12 @@
             document.getElementById('modal-overlay').style.display = 'none';
         }
 
+        initCerrarModalesCampo();
+        document.getElementById('btn-cancel-tarjeta')?.addEventListener('click', cerrarModal);
+
         window.onclick = (e) => {
-            if (e.target == document.getElementById('modal-overlay')) cerrarModal();
-            if (e.target == document.getElementById('metric-modal-overlay')) cerrarModalMetrica();
-            if (e.target == document.getElementById('observation-modal-overlay')) cerrarModalObservacion();
-            if (e.target == document.getElementById('essential-modal-overlay')) cerrarModalResumen();
-            if (e.target == document.getElementById('control-global-modal-overlay')) cerrarModalControlGlobal();
-            if (e.target == document.getElementById('llenado-horas-modal-overlay')) cerrarModalHorasLlenado();
-            if (e.target == document.getElementById('time-picker-modal-overlay')) cerrarTimePickerPersonalizado();
             if (fabMenu && !fabMenu.contains(e.target)) establecerMenuFlotanteAbierto(false);
-        }
+        };
 
         window.addEventListener('online', () => {
             offlineAlertShown = false;

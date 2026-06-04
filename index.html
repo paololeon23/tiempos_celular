@@ -11,9 +11,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="format-detection" content="telephone=no, date=no, email=no, address=no">
     <title>Muestras Web</title>
-    <link rel="icon" href="./log.png" type="image/png">
+    <link rel="icon" href="./appagv.png" type="image/png">
     <link rel="icon" href="./icons/icon-32.png" type="image/png" sizes="32x32">
-    <link rel="apple-touch-icon" href="./log.png">
+    <link rel="apple-touch-icon" href="./appagv.png">
     <link rel="manifest" href="./manifest.json">
     <link rel="stylesheet" href="./librerias/flatpickr.min.css">
     <link rel="stylesheet" href="./styles.css">
@@ -241,7 +241,7 @@
 
     <div class="fab-menu" id="fab-menu">
         <div class="fab-menu-actions">
-            <button class="fab-mini fab-mini--sync" type="button" onclick="sincronizarConPlanillaAhora()" aria-label="Actualizar desde planilla" title="Lee la planilla en Google y actualiza N° muestra y muestras bloqueadas (no borra tus datos)">
+            <button class="fab-mini fab-mini--sync" type="button" onclick="actualizarAppCompletoDesdeFab()" aria-label="Actualizar app y planilla" title="Descarga la versión nueva de la app y sincroniza la planilla si hay internet. No borra borradores ni pendientes.">
                 <i data-lucide="refresh-cw"></i>
             </button>
             <button class="fab-mini fab-mini--danger" onclick="borrarTodoYCacheRapido()" aria-label="Eliminar todo y caché local" title="Forzar reinicio: borra todo lo local y recarga">
@@ -259,12 +259,13 @@
         <button type="button" class="fab-mini fab-mini--registro" id="fab-btn-iniciar-registro" onclick="fabIniciarRegistroDesdeFab()" aria-label="Cargar datos de prueba (simulación)" title="Rellena meta, 8 clamshell y jarras de ejemplo para probar y enviar">
             <i data-lucide="clipboard-list"></i>
         </button>
-        <div class="fecha-ring-widget fecha-ring-widget--fab" id="visual-fecha-ring-widget" aria-label="Fecha actual">
-            <div class="fecha-ring-circle" aria-hidden="true"></div>
+        <div class="fecha-ring-widget fecha-ring-widget--fab fecha-ring-widget--campo" id="visual-fecha-ring-widget" role="button" tabindex="0" aria-label="Fecha de hoy" title="">
+            <div class="fecha-ring-circle" id="campo-fecha-ring-circle" aria-hidden="true"></div>
             <div class="fecha-ring-content">
                 <span class="fecha-ring-day" id="fecha-ring-day">--</span>
                 <span class="fecha-ring-month" id="fecha-ring-month">----</span>
             </div>
+            <div class="fecha-ring-popover" id="campo-fecha-ring-popover" role="tooltip" hidden></div>
         </div>
         <button class="fab-options" id="fab-options-btn" type="button" aria-label="Opciones rápidas" aria-expanded="false">
             <i data-lucide="ellipsis"></i>
@@ -284,7 +285,10 @@
             <div class="form-group"><label>PESO 2 (g)</label><input type="number" id="visual-p2" step="0.1"></div>
             <div class="form-group"><label>LLEGADA ACOPIO (g)</label><input type="number" id="visual-acopio" step="0.1"></div>
             <div class="form-group"><label>DESPACHO ACOPIO (g)</label><input type="number" id="visual-despacho" step="0.1"></div>
-            <button class="btn-save" id="btn-save-tarjeta" onclick="guardarModalTarjeta()">GUARDAR REGISTRO</button>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" id="btn-cancel-tarjeta">Cancelar</button>
+                <button class="btn-save" id="btn-save-tarjeta" type="button" onclick="guardarModalTarjeta()">Guardar</button>
+            </div>
         </div>
     </div>
 

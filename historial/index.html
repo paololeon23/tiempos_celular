@@ -11,34 +11,37 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="format-detection" content="telephone=no, date=no, email=no, address=no">
     <title>Historial</title>
-    <link rel="icon" href="../log.png" type="image/png">
-    <link rel="apple-touch-icon" href="../log.png">
+    <link rel="icon" href="../appagv.png" type="image/png">
+    <link rel="apple-touch-icon" href="../appagv.png">
     <link rel="manifest" href="../manifest.json">
     <link rel="stylesheet" href="../styles.css">
-    <style>
-        .hist-wrap { padding-top: 18px; padding-bottom: 110px; }
-        .hist-kpi { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 14px; }
-        .hist-kpi-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; }
-        .hist-kpi-card b { display: block; font-size: 20px; color: #0f172a; }
-        .hist-kpi-card span { color: #64748b; font-size: 12px; }
-        .hist-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; margin-bottom: 10px; }
-        .hist-title { font-size: 14px; font-weight: 800; margin: 0 0 8px; color: #0f172a; }
-        .hist-list { display: flex; flex-direction: column; gap: 8px; }
-        .hist-row { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .hist-row-main { font-size: 13px; color: #0f172a; font-weight: 700; }
-        .hist-row-sub { font-size: 11px; color: #64748b; }
-        .hist-pill { font-size: 11px; font-weight: 800; border-radius: 999px; padding: 3px 8px; }
-        .hist-pill-ok { background: #dcfce7; color: #166534; }
-        .hist-pill-pend { background: #fef3c7; color: #92400e; }
-        .hist-pill-stop { background: #fee2e2; color: #991b1b; }
-        .hist-empty { font-size: 12px; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 10px; text-align: center; }
-    </style>
 </head>
-<body>
-    <div class="container hist-wrap">
-        <h2 style="margin-bottom: 6px;">Historial</h2>
-        <p style="color: #64748B; margin-bottom: 8px;">Registros del sistema y estado de sincronización local.</p>
+<body class="modulo-aux-page">
 
+    <header>
+        <div class="header-top-row">
+            <h2 class="header-title">
+                <span class="header-title-prefix">Módulo:</span>
+                <span class="header-modulo-pill">Historial</span>
+            </h2>
+            <div class="header-status-card header-status-card--solo-conn is-online" id="hist-header-status" aria-live="polite" aria-label="Conexión">
+                <div class="header-status-ring" aria-hidden="true">
+                    <span class="header-status-ring-inner">
+                        <i data-lucide="wifi" class="header-status-wifi" id="hist-header-wifi"></i>
+                    </span>
+                </div>
+                <div class="header-status-body">
+                    <div class="header-status-conn">
+                        <span class="header-status-conn-dot" aria-hidden="true"></span>
+                        <span class="header-status-conn-text" id="hist-conn-label">En línea</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p class="modulo-header-desc">Registros del sistema y estado de sincronización local.</p>
+    </header>
+
+    <div class="container modulo-aux-wrap">
         <section class="hist-kpi">
             <article class="hist-kpi-card"><b id="kpi-servidor">0</b><span>Registrados en servidor</span></article>
             <article class="hist-kpi-card"><b id="kpi-pendientes">0</b><span>Pendientes por internet</span></article>
@@ -48,11 +51,13 @@
         <section class="hist-section">
             <h3 class="hist-title">Servidor (GET code.gs)</h3>
             <div id="server-list" class="hist-list"></div>
+            <nav id="server-pagination" class="hist-pagination" aria-label="Paginación servidor" hidden></nav>
         </section>
 
         <section class="hist-section">
             <h3 class="hist-title">Sincronización local</h3>
             <div id="local-list" class="hist-list"></div>
+            <nav id="local-pagination" class="hist-pagination" aria-label="Paginación sincronización local" hidden></nav>
         </section>
     </div>
 
@@ -86,6 +91,33 @@
         const API_URL = 'https://script.google.com/macros/s/AKfycbwdC1lwuGNT01xfLE_0jI31oXU13rBinYPKwlVfkZwqmIJGqSRuvPnq4-A9b6tHZThN/exec';
         const SYNC_QUEUE_KEY = 'tiempos-sync-queue-v1';
         const SYNC_HISTORY_KEY = 'tiempos-sync-history-v1';
+        const HIST_PER_PAGE = 10;
+
+        let histServerRows = [];
+        let histLocalRows = [];
+        let histServerPage = 0;
+        let histLocalPage = 0;
+
+        function actualizarHeaderHistorial() {
+            const card = document.getElementById('hist-header-status');
+            const label = document.getElementById('hist-conn-label');
+            const wifi = document.getElementById('hist-header-wifi');
+            const on = navigator.onLine;
+            if (card) {
+                card.classList.toggle('is-online', on);
+                card.classList.toggle('is-offline', !on);
+            }
+            if (label) label.textContent = on ? 'En línea' : 'Sin internet';
+            if (wifi) {
+                wifi.setAttribute('data-lucide', on ? 'wifi' : 'wifi-off');
+                if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                    window.lucide.createIcons();
+                }
+            }
+        }
+
+        window.addEventListener('online', () => actualizarHeaderHistorial());
+        window.addEventListener('offline', () => actualizarHeaderHistorial());
 
         function cbJsonp(urlBase, params) {
             return new Promise((resolve, reject) => {
@@ -142,8 +174,122 @@
             return '<span class="hist-pill hist-pill-stop">' + (x || 'otro') + '</span>';
         }
 
-        function renderServer(registrados) {
+        function escHistText(s) {
+            return String(s ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function histRowMainHtml(numGlobal, linea1, numMuestra) {
+            return ''
+                + '<div class="hist-row-main">'
+                + '<span class="hist-row-kicker">' + escHistText(linea1) + '</span>'
+                + '<span class="hist-row-muestra">N° muestra: <b>' + escHistText(numMuestra || '--') + '</b></span>'
+                + '</div>';
+        }
+
+        function totalPaginasHistorial(total) {
+            return Math.max(1, Math.ceil(Math.max(0, total) / HIST_PER_PAGE));
+        }
+
+        function acotarPaginaHistorial(page, totalItems) {
+            const maxPage = Math.max(0, totalPaginasHistorial(totalItems) - 1);
+            return Math.min(Math.max(0, page), maxPage);
+        }
+
+        function renderPaginacionHistorial(navId, page, totalItems, onPageChange) {
+            const nav = document.getElementById(navId);
+            if (!nav) return;
+            const totalPages = totalPaginasHistorial(totalItems);
+            if (totalItems <= HIST_PER_PAGE) {
+                nav.hidden = true;
+                nav.innerHTML = '';
+                return;
+            }
+            const safePage = acotarPaginaHistorial(page, totalItems);
+            const inicio = safePage * HIST_PER_PAGE + 1;
+            const fin = Math.min(totalItems, (safePage + 1) * HIST_PER_PAGE);
+            nav.hidden = false;
+            nav.innerHTML = ''
+                + '<button type="button" class="hist-page-btn" data-hist-page-dir="prev"'
+                + (safePage <= 0 ? ' disabled' : '') + '>Anterior</button>'
+                + '<span class="hist-page-info">' + inicio + '–' + fin + ' de ' + totalItems
+                + ' · Pág. ' + (safePage + 1) + '/' + totalPages + '</span>'
+                + '<button type="button" class="hist-page-btn" data-hist-page-dir="next"'
+                + (safePage >= totalPages - 1 ? ' disabled' : '') + '>Siguiente</button>';
+            nav.querySelectorAll('[data-hist-page-dir]').forEach((btn) => {
+                btn.onclick = () => {
+                    const dir = btn.getAttribute('data-hist-page-dir');
+                    if (dir === 'prev' && safePage > 0) onPageChange(safePage - 1);
+                    if (dir === 'next' && safePage < totalPages - 1) onPageChange(safePage + 1);
+                };
+            });
+        }
+
+        function pintarListaServidor() {
             const box = document.getElementById('server-list');
+            if (!box) return;
+            histServerPage = acotarPaginaHistorial(histServerPage, histServerRows.length);
+            if (!histServerRows.length) {
+                box.innerHTML = '<div class="hist-empty">Sin registros devueltos por GET.</div>';
+                renderPaginacionHistorial('server-pagination', 0, 0, () => {});
+                return;
+            }
+            const start = histServerPage * HIST_PER_PAGE;
+            const pageRows = histServerRows.slice(start, start + HIST_PER_PAGE);
+            box.innerHTML = pageRows.map((r, idx) => {
+                const n = start + idx + 1;
+                const linea1 = '#' + n + ' · Fecha: ' + (r.fecha || '--');
+                return ''
+                    + '<div class="hist-row">'
+                    + '<div class="hist-row-text">'
+                    + histRowMainHtml(n, linea1, r.num_muestra)
+                    + '<div class="hist-row-sub">Total filas: ' + escHistText(r.total)
+                    + ' · Ensayo(s): ' + escHistText(r.ensayos.length ? r.ensayos.join(', ') : '--') + '</div>'
+                    + '</div>'
+                    + '<span class="hist-pill hist-pill-ok">registrado</span>'
+                    + '</div>';
+            }).join('');
+            renderPaginacionHistorial('server-pagination', histServerPage, histServerRows.length, (p) => {
+                histServerPage = p;
+                pintarListaServidor();
+            });
+        }
+
+        function pintarListaLocal() {
+            const box = document.getElementById('local-list');
+            if (!box) return;
+            histLocalPage = acotarPaginaHistorial(histLocalPage, histLocalRows.length);
+            if (!histLocalRows.length) {
+                box.innerHTML = '<div class="hist-empty">Sin elementos en cola local.</div>';
+                renderPaginacionHistorial('local-pagination', 0, 0, () => {});
+                return;
+            }
+            const start = histLocalPage * HIST_PER_PAGE;
+            const pageRows = histLocalRows.slice(start, start + HIST_PER_PAGE);
+            box.innerHTML = pageRows.map((r, idx) => {
+                const n = start + idx + 1;
+                const linea1 = '#' + n + ' · ' + (r.ensayo || 'Ensayo');
+                const sub = (r.fecha || '--') + ' · intentos: ' + r.intentos
+                    + (r.error ? ' · motivo: ' + r.error : '');
+                return ''
+                    + '<div class="hist-row">'
+                    + '<div class="hist-row-text">'
+                    + histRowMainHtml(n, linea1, r.num_muestra)
+                    + '<div class="hist-row-sub">' + escHistText(sub) + '</div>'
+                    + '</div>'
+                    + pillForEstado(r.estado)
+                    + '</div>';
+            }).join('');
+            renderPaginacionHistorial('local-pagination', histLocalPage, histLocalRows.length, (p) => {
+                histLocalPage = p;
+                pintarListaLocal();
+            });
+        }
+
+        function renderServer(registrados) {
             const list = Array.isArray(registrados) ? registrados.slice(0) : [];
             const grouped = {};
             list.forEach((r) => {
@@ -175,19 +321,9 @@
             });
 
             document.getElementById('kpi-servidor').textContent = String(view.length);
-            if (!view.length) {
-                box.innerHTML = '<div class="hist-empty">Sin registros devueltos por GET.</div>';
-                return;
-            }
-            box.innerHTML = view.slice(0, 160).map((r, idx) => `
-                <div class="hist-row">
-                    <div>
-                        <div class="hist-row-main">#${idx + 1} · Fecha: ${r.fecha || '--'} · N° muestra: ${r.num_muestra || '--'}</div>
-                        <div class="hist-row-sub">Total filas: ${r.total} · Ensayo(s): ${r.ensayos.length ? r.ensayos.join(', ') : '--'}</div>
-                    </div>
-                    <span class="hist-pill hist-pill-ok">registrado</span>
-                </div>
-            `).join('');
+            histServerRows = view;
+            histServerPage = 0;
+            pintarListaServidor();
         }
 
         function renderLocal() {
@@ -213,25 +349,15 @@
             const bloqueados = rows.filter((r) => r.estado && r.estado !== 'pendiente' && r.estado !== 'subido').length;
             document.getElementById('kpi-pendientes').textContent = String(pendientes);
             document.getElementById('kpi-bloqueados').textContent = String(bloqueados);
+            actualizarHeaderHistorial();
 
-            const box = document.getElementById('local-list');
-            if (!rows.length) {
-                box.innerHTML = '<div class="hist-empty">Sin elementos en cola local.</div>';
-                return;
-            }
-            const ordenados = rows.slice(0).sort((a, b) => (b.ts || 0) - (a.ts || 0));
-            box.innerHTML = ordenados.slice(0, 120).map((r, idx) => `
-                <div class="hist-row">
-                    <div>
-                        <div class="hist-row-main">#${idx + 1} · ${r.ensayo || 'Ensayo'} · N° muestra: ${r.num_muestra || '--'}</div>
-                        <div class="hist-row-sub">${r.fecha || '--'} · intentos: ${r.intentos}${r.error ? ' · motivo: ' + r.error : ''}</div>
-                    </div>
-                    ${pillForEstado(r.estado)}
-                </div>
-            `).join('');
+            histLocalRows = rows.slice(0).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+            histLocalPage = 0;
+            pintarListaLocal();
         }
 
         async function initHistorial() {
+            actualizarHeaderHistorial();
             renderLocal();
             try {
                 const r = await cbJsonp(API_URL, { listado_registrados: '1' });

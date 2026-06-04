@@ -11,11 +11,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="format-detection" content="telephone=no, date=no, email=no, address=no">
     <title>Packing</title>
-    <link rel="icon" href="../log.png" type="image/png">
+    <link rel="icon" href="../appagv.png" type="image/png">
     <link rel="icon" href="../icons/icon-32.png" type="image/png" sizes="32x32">
-    <link rel="apple-touch-icon" href="../log.png">
+    <link rel="apple-touch-icon" href="../appagv.png">
     <link rel="manifest" href="../manifest.json">
-    <link rel="stylesheet" href="../styles.css?v=62">
+    <link rel="stylesheet" href="../styles.css">
 </head>
 <body class="packing-page">
 
@@ -139,16 +139,16 @@
 
     <div class="fab-menu" id="fab-menu-packing">
         <div class="fab-menu-actions">
-            <button class="fab-mini fab-mini--sync" type="button" id="fab-packing-sync" aria-label="Actualizar desde planilla" title="Lee la planilla y actualiza fechas y muestras de packing">
+            <button class="fab-mini fab-mini--sync" type="button" id="fab-packing-sync" aria-label="Actualizar app y planilla" title="Descarga la versión nueva de la app y sincroniza packing si hay internet. No borra borradores ni pendientes.">
                 <i data-lucide="refresh-cw"></i>
             </button>
             <button class="fab-mini fab-mini--danger" type="button" id="fab-packing-borrar" aria-label="Eliminar todo y caché local" title="Borra datos locales de packing y recarga">
                 <i data-lucide="trash-2"></i>
             </button>
+            <button type="button" class="fab-mini fab-mini--registro" id="fab-packing-demo" aria-label="Datos de prueba packing" title="Simula pesos, tiempos y control equitativo según el total de clamshells del servidor">
+                <i data-lucide="flask-conical"></i>
+            </button>
         </div>
-        <button type="button" class="fab-mini fab-mini--registro" id="fab-packing-demo" aria-label="Datos de prueba packing" title="Simula pesos, tiempos y control equitativo según el total de clamshells del servidor">
-            <i data-lucide="flask-conical"></i>
-        </button>
         <button type="button" class="packing-agregar-fab" id="fab-packing-agregar" aria-label="Agregar clamshell" title="Seleccionar muestra para continuar por favor">
             <svg class="packing-agregar-plus fab-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 5v14M5 12h14"></path>
@@ -194,7 +194,10 @@
                 </div>
             </div>
             <div id="packing-pesos-alert" class="metric-inline-alert" style="display:none;"></div>
-            <button class="btn-save" type="button" id="packing-pesos-guardar">GUARDAR REGISTRO</button>
+            <div class="metric-modal-foot">
+                <button class="btn-secondary" type="button" id="packing-pesos-cancel">Cancelar</button>
+                <button class="btn-save" type="button" id="packing-pesos-guardar">Guardar</button>
+            </div>
         </div>
     </div>
 
@@ -318,6 +321,6 @@
     <script src="../librerias/lucide.min.js"></script>
     <script src="../librerias/sweetalert2.all.min.js"></script>
     <script src="../time-picker.js"></script>
-    <script src="./packing.js?v=78"></script>
+    <script src="./packing.js"></script>
 </body>
 </html>
