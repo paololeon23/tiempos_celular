@@ -32,6 +32,8 @@
         'app.js',
         'campo-pdf.js',
         'librerias/jspdf.umd.min.js',
+        'librerias/pdf.min.js',
+        'librerias/pdf.worker.min.js',
         'network.js',
         'script.js',
         'catalogo-json.js',

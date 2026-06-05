@@ -24,6 +24,62 @@
     let logoDataUrlCache = null;
     let pdfBlobActual = null;
     let pdfNombreActual = 'medicion-arandano.pdf';
+    let pdfUrlActual = null;
+    let pdfjsLibInited = false;
+
+    function workerSrcPdfJs() {
+        try {
+            return new URL('librerias/pdf.worker.min.js', document.baseURI || window.location.href).href;
+        } catch (_) {
+            return './librerias/pdf.worker.min.js';
+        }
+    }
+
+    function obtenerPdfJs() {
+        const lib = window.pdfjsLib;
+        if (!lib) return null;
+        if (!pdfjsLibInited) {
+            lib.GlobalWorkerOptions.workerSrc = workerSrcPdfJs();
+            pdfjsLibInited = true;
+        }
+        return lib;
+    }
+
+    function esperarLayoutModal() {
+        return new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+    }
+
+    function estadoVistaPreviaPdf(estado) {
+        const stage = document.getElementById('pdf-preview-stage');
+        const loading = document.getElementById('pdf-preview-loading');
+        const fallback = document.getElementById('pdf-preview-fallback');
+        const pages = document.getElementById('pdf-preview-pages');
+        if (stage) stage.dataset.state = estado;
+        if (loading) loading.style.display = estado === 'loading' ? 'flex' : 'none';
+        if (pages) pages.style.display = estado === 'ready' ? 'flex' : 'none';
+        if (fallback) {
+            fallback.hidden = estado !== 'error';
+            fallback.style.display = estado === 'error' ? 'flex' : 'none';
+        }
+    }
+
+    async function cargarPdfParaVista(lib, data, sinWorker) {
+        const task = lib.getDocument({
+            data,
+            disableWorker: !!sinWorker,
+            disableFontFace: true
+        });
+        return task.promise;
+    }
+
+    function revocarPdfUrlActual() {
+        if (pdfUrlActual) {
+            try { URL.revokeObjectURL(pdfUrlActual); } catch (_) { /* ignore */ }
+            pdfUrlActual = null;
+        }
+    }
 
     function contentWidth() {
         return PAGE.w - PAGE.margin * 2;
@@ -742,25 +798,95 @@
         return doc.output('blob');
     }
 
+    function limpiarVistaPreviaPdf() {
+        const pages = document.getElementById('pdf-preview-pages');
+        if (pages) pages.innerHTML = '';
+        estadoVistaPreviaPdf('loading');
+    }
+
+    async function renderizarVistaPreviaPdf(blob) {
+        const stage = document.getElementById('pdf-preview-stage');
+        const pagesEl = document.getElementById('pdf-preview-pages');
+        if (!stage || !pagesEl) return false;
+
+        limpiarVistaPreviaPdf();
+        await esperarLayoutModal();
+
+        const lib = obtenerPdfJs();
+        if (!lib) {
+            estadoVistaPreviaPdf('error');
+            return false;
+        }
+
+        try {
+            const data = await blob.arrayBuffer();
+            let pdf;
+            try {
+                pdf = await cargarPdfParaVista(lib, data, true);
+            } catch (errWorker) {
+                console.warn('[PDF preview] reintento con worker', errWorker);
+                pdf = await cargarPdfParaVista(lib, data, false);
+            }
+
+            const ancho = Math.max(260, (stage.clientWidth || window.innerWidth || 320) - 24);
+            pagesEl.innerHTML = '';
+
+            for (let p = 1; p <= pdf.numPages; p++) {
+                const page = await pdf.getPage(p);
+                const baseVp = page.getViewport({ scale: 1 });
+                const scale = ancho / baseVp.width;
+                const viewport = page.getViewport({ scale });
+                const canvas = document.createElement('canvas');
+                canvas.className = 'pdf-preview-page';
+                const ctx = canvas.getContext('2d', { alpha: false });
+                canvas.width = Math.floor(viewport.width);
+                canvas.height = Math.floor(viewport.height);
+                await page.render({ canvasContext: ctx, viewport }).promise;
+
+                const wrap = document.createElement('div');
+                wrap.className = 'pdf-preview-page-wrap';
+                if (pdf.numPages > 1) {
+                    const lbl = document.createElement('span');
+                    lbl.className = 'pdf-preview-page-label';
+                    lbl.textContent = `Hoja ${p} / ${pdf.numPages}`;
+                    wrap.appendChild(lbl);
+                }
+                wrap.appendChild(canvas);
+                pagesEl.appendChild(wrap);
+            }
+
+            estadoVistaPreviaPdf('ready');
+            return true;
+        } catch (err) {
+            console.warn('[PDF preview]', err);
+            estadoVistaPreviaPdf('error');
+            return false;
+        }
+    }
+
     function cerrarModalPdf() {
         const ov = document.getElementById('pdf-modal-overlay');
         if (ov) ov.style.display = 'none';
-        const iframe = document.getElementById('pdf-preview-iframe');
-        if (iframe && iframe.src && iframe.src.startsWith('blob:')) {
-            try { URL.revokeObjectURL(iframe.src); } catch (_) { /* ignore */ }
-        }
-        if (iframe) iframe.removeAttribute('src');
+        limpiarVistaPreviaPdf();
+        revocarPdfUrlActual();
     }
 
-    function abrirModalPdf(blob, nombre) {
+    function abrirPdfEnVisorExterno() {
+        if (!pdfBlobActual) return;
+        if (!pdfUrlActual) pdfUrlActual = URL.createObjectURL(pdfBlobActual);
+        window.open(pdfUrlActual, '_blank', 'noopener,noreferrer');
+    }
+
+    async function abrirModalPdf(blob, nombre) {
         pdfBlobActual = blob;
         pdfNombreActual = nombre || 'medicion-arandano.pdf';
         const ov = document.getElementById('pdf-modal-overlay');
-        const iframe = document.getElementById('pdf-preview-iframe');
-        if (!ov || !iframe) return;
-        const url = URL.createObjectURL(blob);
-        iframe.src = url;
+        if (!ov) return;
+        revocarPdfUrlActual();
+        pdfUrlActual = URL.createObjectURL(blob);
         ov.style.display = 'flex';
+        await esperarLayoutModal();
+        await renderizarVistaPreviaPdf(blob);
         if (window.lucide && typeof window.lucide.createIcons === 'function') {
             window.lucide.createIcons();
         }
@@ -829,6 +955,7 @@
         });
         document.getElementById('pdf-btn-cerrar')?.addEventListener('click', cerrarModalPdf);
         document.getElementById('pdf-btn-descargar')?.addEventListener('click', descargarPdfActual);
+        document.getElementById('pdf-btn-abrir')?.addEventListener('click', abrirPdfEnVisorExterno);
         document.getElementById('pdf-btn-wsp')?.addEventListener('click', () => {
             void compartirWhatsAppPdf();
         });

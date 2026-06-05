@@ -420,7 +420,19 @@
                     <i data-lucide="x"></i>
                 </button>
             </div>
-            <iframe class="pdf-preview-frame" id="pdf-preview-iframe" title="Vista previa del formato Agrovision"></iframe>
+            <div class="pdf-preview-stage" id="pdf-preview-stage">
+                <div class="pdf-preview-loading" id="pdf-preview-loading">
+                    <span class="pdf-preview-loading-spinner" aria-hidden="true"></span>
+                    <span>Cargando vista previa…</span>
+                </div>
+                <div class="pdf-preview-pages" id="pdf-preview-pages"></div>
+                <div class="pdf-preview-fallback" id="pdf-preview-fallback" hidden>
+                    <i data-lucide="file-text" class="pdf-preview-fallback-icon" aria-hidden="true"></i>
+                    <p class="pdf-preview-fallback-title">No se pudo mostrar la vista previa</p>
+                    <p class="pdf-preview-fallback-hint">El PDF sí se generó. Usa <strong>Descargar</strong>, <strong>WhatsApp</strong> o ábrelo en el visor del teléfono.</p>
+                    <button type="button" class="btn-save pdf-preview-open-btn" id="pdf-btn-abrir">Abrir PDF</button>
+                </div>
+            </div>
             <div class="pdf-modal-actions">
                 <button type="button" class="btn-save pdf-action-btn" id="pdf-btn-descargar">
                     <i data-lucide="download"></i>
@@ -461,6 +473,7 @@
     <script src="./librerias/flatpickr-l10n-es.js"></script>
     <script src="./app.js" charset="utf-8"></script>
     <script src="./librerias/jspdf.umd.min.js"></script>
+    <script src="./librerias/pdf.min.js"></script>
     <script src="./campo-pdf.js"></script>
     <script src="./network.js"></script>
     <script src="./script.js"></script>
