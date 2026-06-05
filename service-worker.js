@@ -1,4 +1,4 @@
-const SW_VERSION = 'v151';
+const SW_VERSION = 'v155';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 120;
@@ -13,6 +13,18 @@ const APP_SHELL = [
     './librerias/jspdf.umd.min.js',
     './librerias/pdf.min.js',
     './librerias/pdf.worker.min.js',
+    './librerias/standard_fonts/FoxitFixed.pfb',
+    './librerias/standard_fonts/FoxitFixedBold.pfb',
+    './librerias/standard_fonts/FoxitFixedBoldItalic.pfb',
+    './librerias/standard_fonts/FoxitFixedItalic.pfb',
+    './librerias/standard_fonts/FoxitSerif.pfb',
+    './librerias/standard_fonts/FoxitSerifBold.pfb',
+    './librerias/standard_fonts/FoxitSerifBoldItalic.pfb',
+    './librerias/standard_fonts/FoxitSerifItalic.pfb',
+    './librerias/standard_fonts/LiberationSans-Bold.ttf',
+    './librerias/standard_fonts/LiberationSans-BoldItalic.ttf',
+    './librerias/standard_fonts/LiberationSans-Italic.ttf',
+    './librerias/standard_fonts/LiberationSans-Regular.ttf',
     './network.js',
     './script.js',
     './catalogo-json.js',

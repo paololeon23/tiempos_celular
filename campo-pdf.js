@@ -26,12 +26,23 @@
     let pdfNombreActual = 'medicion-arandano.pdf';
     let pdfUrlActual = null;
     let pdfjsLibInited = false;
+    let pdfPreviewSession = null;
+    const pdfZoomState = { scale: 1, min: 0.6, max: 4, step: 0.35 };
+    const PDF_PREVIEW_DPR = () => Math.min(window.devicePixelRatio || 1, 3);
 
     function workerSrcPdfJs() {
         try {
             return new URL('librerias/pdf.worker.min.js', document.baseURI || window.location.href).href;
         } catch (_) {
             return './librerias/pdf.worker.min.js';
+        }
+    }
+
+    function standardFontsUrlPdfJs() {
+        try {
+            return new URL('librerias/standard_fonts/', document.baseURI || window.location.href).href;
+        } catch (_) {
+            return './librerias/standard_fonts/';
         }
     }
 
@@ -65,13 +76,49 @@
         }
     }
 
+    function esDispositivoMovil() {
+        const ua = String(navigator.userAgent || '');
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    }
+
+    function prefiereVisorPdfNativo() {
+        return !esDispositivoMovil();
+    }
+
     async function cargarPdfParaVista(lib, data, sinWorker) {
         const task = lib.getDocument({
             data,
             disableWorker: !!sinWorker,
-            disableFontFace: true
+            isEvalSupported: false,
+            standardFontDataUrl: standardFontsUrlPdfJs(),
+            verbosity: 0
         });
         return task.promise;
+    }
+
+    function mostrarVisorPdfNativo(url) {
+        const embed = document.getElementById('pdf-preview-embed');
+        const scaler = document.getElementById('pdf-preview-scaler');
+        const zoomBar = document.getElementById('pdf-preview-zoom-bar');
+        if (!embed) return false;
+        embed.src = `${url}#toolbar=1&navpanes=0&scrollbar=1&view=FitH`;
+        embed.hidden = false;
+        if (scaler) scaler.hidden = true;
+        if (zoomBar) zoomBar.hidden = true;
+        estadoVistaPreviaPdf('ready');
+        return true;
+    }
+
+    function ocultarVisorPdfNativo() {
+        const embed = document.getElementById('pdf-preview-embed');
+        const scaler = document.getElementById('pdf-preview-scaler');
+        const zoomBar = document.getElementById('pdf-preview-zoom-bar');
+        if (embed) {
+            embed.removeAttribute('src');
+            embed.hidden = true;
+        }
+        if (scaler) scaler.hidden = false;
+        if (zoomBar) zoomBar.hidden = false;
     }
 
     function revocarPdfUrlActual() {
@@ -798,67 +845,221 @@
         return doc.output('blob');
     }
 
+    function escalaPdfZoomClamped(valor) {
+        return Math.min(pdfZoomState.max, Math.max(pdfZoomState.min, valor));
+    }
+
+    function actualizarEtiquetaPdfZoom(scale) {
+        const label = document.getElementById('pdf-zoom-label');
+        if (label) label.textContent = `${Math.round(scale * 100)}%`;
+    }
+
+    function aplicarPdfZoomPreview() {
+        const scaler = document.getElementById('pdf-preview-scaler');
+        const s = escalaPdfZoomClamped(pdfZoomState.scale);
+        pdfZoomState.scale = s;
+        const base = pdfPreviewSession?.lastRenderedZoom || 1;
+        if (scaler && pdfPreviewSession) {
+            const ratio = s / base;
+            scaler.style.transform = Math.abs(ratio - 1) < 0.02 ? '' : `scale(${ratio})`;
+            scaler.style.transformOrigin = 'top center';
+        }
+        actualizarEtiquetaPdfZoom(s);
+    }
+
+    function resetPdfZoom() {
+        pdfZoomState.scale = 1;
+        if (pdfPreviewSession) {
+            void comprometerPdfZoom();
+        } else {
+            aplicarPdfZoomPreview();
+        }
+    }
+
+    async function renderizarPdfPreviewZoom(zoom) {
+        if (!pdfPreviewSession) return;
+        const session = pdfPreviewSession;
+        const zoomFinal = escalaPdfZoomClamped(zoom);
+        const token = ++session.renderGen;
+        const dpr = PDF_PREVIEW_DPR();
+        const scaler = document.getElementById('pdf-preview-scaler');
+
+        for (const item of session.pages) {
+            const page = await session.pdf.getPage(item.pageNum);
+            const baseVp = page.getViewport({ scale: 1 });
+            const displayScale = session.ancho / baseVp.width;
+            const cssVp = page.getViewport({ scale: displayScale * zoomFinal });
+            const renderVp = page.getViewport({ scale: displayScale * zoomFinal * dpr });
+            item.canvas.width = Math.floor(renderVp.width);
+            item.canvas.height = Math.floor(renderVp.height);
+            item.canvas.style.width = `${Math.floor(cssVp.width)}px`;
+            item.canvas.style.height = `${Math.floor(cssVp.height)}px`;
+            if (token !== session.renderGen) return;
+            await page.render({ canvasContext: item.ctx, viewport: renderVp }).promise;
+        }
+
+        if (token !== session.renderGen) return;
+        session.lastRenderedZoom = zoomFinal;
+        pdfZoomState.scale = zoomFinal;
+        if (scaler) scaler.style.transform = '';
+        actualizarEtiquetaPdfZoom(zoomFinal);
+    }
+
+    function comprometerPdfZoom() {
+        if (!pdfPreviewSession) {
+            aplicarPdfZoomPreview();
+            return;
+        }
+        if (pdfPreviewSession.zoomTimer) {
+            clearTimeout(pdfPreviewSession.zoomTimer);
+            pdfPreviewSession.zoomTimer = null;
+        }
+        const zoomObjetivo = escalaPdfZoomClamped(pdfZoomState.scale);
+        return renderizarPdfPreviewZoom(zoomObjetivo);
+    }
+
+    function cambiarPdfZoom(delta) {
+        pdfZoomState.scale = escalaPdfZoomClamped(pdfZoomState.scale + delta);
+        void comprometerPdfZoom();
+    }
+
+    function distanciaToques(t1, t2) {
+        const dx = t1.clientX - t2.clientX;
+        const dy = t1.clientY - t2.clientY;
+        return Math.hypot(dx, dy);
+    }
+
+    function enlazarZoomVistaPreviaPdf() {
+        const stage = document.getElementById('pdf-preview-stage');
+        if (!stage || stage.dataset.zoomBound === '1') return;
+        stage.dataset.zoomBound = '1';
+
+        let pinchInicio = 0;
+        let escalaInicio = 1;
+        let ultimoTap = 0;
+
+        stage.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                pinchInicio = distanciaToques(e.touches[0], e.touches[1]);
+                escalaInicio = pdfZoomState.scale;
+            }
+        }, { passive: true });
+
+        stage.addEventListener('touchmove', (e) => {
+            if (e.touches.length !== 2 || !pinchInicio) return;
+            const ratio = distanciaToques(e.touches[0], e.touches[1]) / pinchInicio;
+            pdfZoomState.scale = escalaPdfZoomClamped(escalaInicio * ratio);
+            aplicarPdfZoomPreview();
+        }, { passive: true });
+
+        stage.addEventListener('touchend', (e) => {
+            const habiaPinch = !!pinchInicio;
+            if (e.touches.length < 2) pinchInicio = 0;
+            if (habiaPinch) {
+                void comprometerPdfZoom();
+                return;
+            }
+            const ahora = Date.now();
+            if (e.changedTouches.length === 1 && ahora - ultimoTap < 320) {
+                pdfZoomState.scale = pdfZoomState.scale < 1.45 ? 2 : 1;
+                void comprometerPdfZoom();
+                ultimoTap = 0;
+            } else {
+                ultimoTap = ahora;
+            }
+        }, { passive: true });
+    }
+
     function limpiarVistaPreviaPdf() {
         const pages = document.getElementById('pdf-preview-pages');
+        if (pdfPreviewSession?.zoomTimer) {
+            clearTimeout(pdfPreviewSession.zoomTimer);
+        }
+        pdfPreviewSession = null;
         if (pages) pages.innerHTML = '';
+        ocultarVisorPdfNativo();
+        pdfZoomState.scale = 1;
+        actualizarEtiquetaPdfZoom(1);
+        const scaler = document.getElementById('pdf-preview-scaler');
+        if (scaler) scaler.style.transform = '';
         estadoVistaPreviaPdf('loading');
     }
 
-    async function renderizarVistaPreviaPdf(blob) {
+    async function renderizarVistaPreviaPdfCanvas(blob) {
         const stage = document.getElementById('pdf-preview-stage');
         const pagesEl = document.getElementById('pdf-preview-pages');
         if (!stage || !pagesEl) return false;
 
+        ocultarVisorPdfNativo();
+        const lib = obtenerPdfJs();
+        if (!lib) return false;
+
+        const data = await blob.arrayBuffer();
+        let pdf;
+        try {
+            pdf = await cargarPdfParaVista(lib, data, false);
+        } catch (errWorker) {
+            console.warn('[PDF preview] reintento sin worker', errWorker);
+            pdf = await cargarPdfParaVista(lib, data, true);
+        }
+
+        const ancho = Math.max(260, (stage.clientWidth || window.innerWidth || 320) - 24);
+        pagesEl.innerHTML = '';
+        pdfPreviewSession = {
+            pdf,
+            ancho,
+            pages: [],
+            renderGen: 0,
+            lastRenderedZoom: 1,
+            zoomTimer: null
+        };
+
+        for (let p = 1; p <= pdf.numPages; p++) {
+            const page = await pdf.getPage(p);
+            await page.getTextContent();
+            const canvas = document.createElement('canvas');
+            canvas.className = 'pdf-preview-page';
+            const ctx = canvas.getContext('2d', { alpha: false });
+
+            const wrap = document.createElement('div');
+            wrap.className = 'pdf-preview-page-wrap';
+            if (pdf.numPages > 1) {
+                const lbl = document.createElement('span');
+                lbl.className = 'pdf-preview-page-label';
+                lbl.textContent = `Hoja ${p} / ${pdf.numPages}`;
+                wrap.appendChild(lbl);
+            }
+            wrap.appendChild(canvas);
+            pagesEl.appendChild(wrap);
+            pdfPreviewSession.pages.push({ pageNum: p, canvas, ctx, wrap });
+        }
+
+        estadoVistaPreviaPdf('ready');
+        pdfZoomState.scale = 1;
+        await renderizarPdfPreviewZoom(1);
+        return true;
+    }
+
+    async function renderizarVistaPreviaPdf(blob) {
+        const stage = document.getElementById('pdf-preview-stage');
+        if (!stage) return false;
+
         limpiarVistaPreviaPdf();
         await esperarLayoutModal();
 
-        const lib = obtenerPdfJs();
-        if (!lib) {
-            estadoVistaPreviaPdf('error');
-            return false;
+        if (prefiereVisorPdfNativo() && pdfUrlActual && mostrarVisorPdfNativo(pdfUrlActual)) {
+            return true;
         }
 
         try {
-            const data = await blob.arrayBuffer();
-            let pdf;
-            try {
-                pdf = await cargarPdfParaVista(lib, data, true);
-            } catch (errWorker) {
-                console.warn('[PDF preview] reintento con worker', errWorker);
-                pdf = await cargarPdfParaVista(lib, data, false);
-            }
-
-            const ancho = Math.max(260, (stage.clientWidth || window.innerWidth || 320) - 24);
-            pagesEl.innerHTML = '';
-
-            for (let p = 1; p <= pdf.numPages; p++) {
-                const page = await pdf.getPage(p);
-                const baseVp = page.getViewport({ scale: 1 });
-                const scale = ancho / baseVp.width;
-                const viewport = page.getViewport({ scale });
-                const canvas = document.createElement('canvas');
-                canvas.className = 'pdf-preview-page';
-                const ctx = canvas.getContext('2d', { alpha: false });
-                canvas.width = Math.floor(viewport.width);
-                canvas.height = Math.floor(viewport.height);
-                await page.render({ canvasContext: ctx, viewport }).promise;
-
-                const wrap = document.createElement('div');
-                wrap.className = 'pdf-preview-page-wrap';
-                if (pdf.numPages > 1) {
-                    const lbl = document.createElement('span');
-                    lbl.className = 'pdf-preview-page-label';
-                    lbl.textContent = `Hoja ${p} / ${pdf.numPages}`;
-                    wrap.appendChild(lbl);
-                }
-                wrap.appendChild(canvas);
-                pagesEl.appendChild(wrap);
-            }
-
-            estadoVistaPreviaPdf('ready');
-            return true;
+            const ok = await renderizarVistaPreviaPdfCanvas(blob);
+            if (!ok) estadoVistaPreviaPdf('error');
+            return ok;
         } catch (err) {
             console.warn('[PDF preview]', err);
+            if (pdfUrlActual && prefiereVisorPdfNativo() && mostrarVisorPdfNativo(pdfUrlActual)) {
+                return true;
+            }
             estadoVistaPreviaPdf('error');
             return false;
         }
@@ -950,12 +1151,16 @@
     }
 
     function initCampoPdf() {
+        enlazarZoomVistaPreviaPdf();
         document.getElementById('fab-pdf-btn')?.addEventListener('click', () => {
             void generarYMostrarPdfCampo();
         });
         document.getElementById('pdf-btn-cerrar')?.addEventListener('click', cerrarModalPdf);
         document.getElementById('pdf-btn-descargar')?.addEventListener('click', descargarPdfActual);
         document.getElementById('pdf-btn-abrir')?.addEventListener('click', abrirPdfEnVisorExterno);
+        document.getElementById('pdf-zoom-in')?.addEventListener('click', () => cambiarPdfZoom(pdfZoomState.step));
+        document.getElementById('pdf-zoom-out')?.addEventListener('click', () => cambiarPdfZoom(-pdfZoomState.step));
+        document.getElementById('pdf-zoom-reset')?.addEventListener('click', resetPdfZoom);
         document.getElementById('pdf-btn-wsp')?.addEventListener('click', () => {
             void compartirWhatsAppPdf();
         });
