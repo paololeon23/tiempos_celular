@@ -7,9 +7,11 @@
     'visual-traz-etapa',
     'visual-traz-campo',
     'visual-traz-turno',
+    'visual-traz-acopio',
     'visual-meta-variedad',
     'visual-guia-acopio',
     'visual-placa-vehiculo',
+    'visual-observacion-formato',
     'visual-trazabilidad',
     'visual-rotulo'
 ];
@@ -113,7 +115,8 @@
             // Observacion y logistica
             'visual-observation',
             'visual-guia-acopio',
-            'visual-placa-vehiculo'
+            'visual-placa-vehiculo',
+            'visual-observacion-formato'
         ];
         /** Web App de Apps Script: pega aquí tu URL completa (ej. https://script.google.com/macros/s/.../exec). */
         const APPS_SCRIPT_API_URL = 'https://script.google.com/macros/s/AKfycbwdC1lwuGNT01xfLE_0jI31oXU13rBinYPKwlVfkZwqmIJGqSRuvPnq4-A9b6tHZThN/exec';
@@ -381,15 +384,28 @@
         }
 
         let offlineAlertShown = false;
+        const OFFLINE_ALERT_TITULO = 'Atencion: modo offline';
+
+        function cerrarAlertaModoOfflineSiAbierta() {
+            if (!(window.Swal && typeof window.Swal.isVisible === 'function' && window.Swal.isVisible())) {
+                return;
+            }
+            const tituloEl = document.querySelector('.swal2-title');
+            const titulo = String(tituloEl?.textContent || '').trim();
+            if (titulo === OFFLINE_ALERT_TITULO && typeof window.Swal.close === 'function') {
+                try { window.Swal.close(); } catch (_) { /* ignore */ }
+            }
+        }
+
         function mostrarAlertaModoOffline() {
             if (offlineAlertShown) return;
+            if (typeof navigator !== 'undefined' && navigator.onLine) return;
             offlineAlertShown = true;
-            const titulo = 'Atencion: modo offline';
             const texto = 'El sistema va a funcionar offline. Atencion y tener precaucion. Queda atento a todo.';
             if (window.Swal && typeof window.Swal.fire === 'function') {
                 swalFireSafe({
                     icon: 'warning',
-                    title: titulo,
+                    title: OFFLINE_ALERT_TITULO,
                     text: texto,
                     confirmButtonText: 'Entendido',
                     allowOutsideClick: false
@@ -748,7 +764,7 @@
                 || ''
             );
             const muestra = document.getElementById('visual-meta-muestra')?.value?.trim() ?? '';
-            const t = document.getElementById('visual-trazabilidad')?.value?.trim() ?? '';
+            const t = trazabilidadBaseDesdeMeta(leerMetaFormulario());
             const pNum = document.getElementById('preview-num');
             const pMuestra = document.getElementById('preview-muestra');
             const pTraz = document.getElementById('preview-traz');
@@ -765,6 +781,25 @@
                 pTraz.textContent = t || '--';
                 pTraz.classList.toggle('meta-preview-pill--empty', !t);
             }
+        }
+
+        function trazabilidadBaseDesdeMeta(meta) {
+            const m = meta || {};
+            const compuesto = String(m['visual-trazabilidad'] || '').trim();
+            if (compuesto && !compuesto.includes(' / ')) return compuesto;
+            const etapa = String(m['visual-traz-etapa'] || '').trim();
+            const campo = String(m['visual-traz-campo'] || '').trim();
+            const turno = String(m['visual-traz-turno'] || '').trim();
+            const partes = [etapa, campo, turno].filter(Boolean);
+            return partes.length ? partes.join('-') : '';
+        }
+
+        /** Solo visual (preview/PDF): E-C-T / Acopio N. No se envía a planilla. */
+        function trazabilidadTextoMostrar(meta) {
+            const base = trazabilidadBaseDesdeMeta(meta);
+            const acopio = String(meta?.['visual-traz-acopio'] || '').trim();
+            if (base && acopio) return `${base} / ${acopio}`;
+            return base || acopio || '';
         }
 
         function sincronizarTrazabilidadCompuesta() {
@@ -791,13 +826,17 @@
             [etapaEl, campoEl, turnoEl].forEach((el) => {
                 el.disabled = !habilitado;
             });
-            // Variedad siempre debe quedar habilitada (independiente de Fundo/Traza).
-            if (variedadEl) variedadEl.disabled = false;
             if (!habilitado) {
                 etapaEl.value = '';
                 campoEl.value = '';
                 turnoEl.value = '';
+                if (variedadEl) variedadEl.value = '';
                 sincronizarTrazabilidadCompuesta();
+            }
+            if (typeof window.aplicarFiltrosParcelaCampo === 'function') {
+                window.aplicarFiltrosParcelaCampo();
+            } else if (variedadEl) {
+                variedadEl.disabled = !habilitado;
             }
         }
 
@@ -1160,8 +1199,8 @@
             if (!meta) return false;
             const ids = [
                 'visual-responsable', 'visual-guia-precosecha', 'visual-hora',
-                'visual-meta-fundo', 'visual-meta-variedad', 'visual-traz-etapa',
-                'visual-guia-acopio', 'visual-placa-vehiculo'
+                'visual-meta-fundo', 'visual-meta-variedad', 'visual-traz-etapa', 'visual-traz-campo',
+                'visual-guia-acopio', 'visual-placa-vehiculo', 'visual-observacion-formato'
             ];
             return ids.some((id) => String(meta[id] || '').trim() !== '');
         }
@@ -1189,6 +1228,12 @@
             } else {
                 asegurarNumMuestraAsignadoSiVacio(objetivo);
             }
+            if (typeof window.aplicarParcelaCampoDesdeMeta === 'function') {
+                window.aplicarParcelaCampoDesdeMeta(dataEnsayo);
+            } else if (typeof window.refrescarSelectsCatalogoCampo === 'function') {
+                window.refrescarSelectsCatalogoCampo();
+            }
+            asegurarOpcionesSelectAcopio(dataEnsayo['visual-traz-acopio']);
             actualizarBloqueoTrazabilidadPorFundo();
             sincronizarTrazabilidadCompuesta();
             sincronizarChipsDesdeAlmacenamiento();
@@ -1271,10 +1316,10 @@
             const pad = (n) => String(n).padStart(2, '0');
             const now = new Date();
             fill('visual-hora', `${pad(now.getHours())}:${pad(now.getMinutes())}`);
-            fill('visual-meta-fundo', 'LN');
-            fill('visual-meta-variedad', 'Júpiter');
-            fill('visual-traz-etapa', 'E5');
-            fill('visual-traz-campo', 'C1');
+            fill('visual-meta-fundo', 'A9');
+            fill('visual-traz-etapa', 'E06');
+            fill('visual-traz-campo', 'C01');
+            fill('visual-meta-variedad', 'Sekoya Pop');
             fill('visual-traz-turno', 'T1');
             cargarMetaDeEnsayo(ensayo);
             const g = document.getElementById('visual-guia-acopio');
@@ -1484,6 +1529,7 @@
             'visual-guia-precosecha',
             'visual-hora',
             'visual-meta-fundo',
+            'visual-traz-acopio',
             'visual-traz-etapa',
             'visual-traz-campo',
             'visual-traz-turno',
@@ -1499,6 +1545,39 @@
                 if (next) next.focus();
             });
         });
+
+        function asegurarOpcionesSelectAcopio(valorPreferido) {
+            const sel = document.getElementById('visual-traz-acopio');
+            if (!sel) return;
+            const actual = String(valorPreferido != null ? valorPreferido : sel.value || '').trim();
+            const valores = new Set(['']);
+            for (let i = 1; i <= 25; i++) valores.add(`Acopio ${i}`);
+            if (sel.options.length < 26) {
+                const prev = actual;
+                sel.innerHTML = '<option value="">Acopio</option>';
+                for (let i = 1; i <= 25; i++) {
+                    const opt = document.createElement('option');
+                    opt.value = `Acopio ${i}`;
+                    opt.textContent = `Acopio ${i}`;
+                    sel.appendChild(opt);
+                }
+                if (prev && !valores.has(prev)) {
+                    const leg = document.createElement('option');
+                    leg.value = prev;
+                    leg.textContent = `${prev} (guardado)`;
+                    sel.appendChild(leg);
+                }
+                sel.value = prev && [...sel.options].some((o) => o.value === prev) ? prev : '';
+            } else if (actual && !valores.has(actual) && ![...sel.options].some((o) => o.value === actual)) {
+                const leg = document.createElement('option');
+                leg.value = actual;
+                leg.textContent = `${actual} (guardado)`;
+                sel.appendChild(leg);
+                sel.value = actual;
+            }
+        }
+        window.asegurarOpcionesSelectAcopio = asegurarOpcionesSelectAcopio;
+        asegurarOpcionesSelectAcopio();
 
         conectarGruposChips();
         const cargoMeta = cargarMetaDesdeAlmacenamiento();
@@ -2211,6 +2290,14 @@
             });
         }());
 
+        (function initObservacionFormato() {
+            const ta = document.getElementById('visual-observacion-formato');
+            if (!ta) return;
+            const guardar = () => programarGuardadoMeta();
+            ta.addEventListener('input', guardar);
+            ta.addEventListener('change', guardar);
+        }());
+
         function establecerMenuFlotanteAbierto(open) {
             if (!fabMenu || !fabOptionsBtn) return;
             fabMenu.classList.toggle('is-open', open);
@@ -2332,10 +2419,12 @@
                     btn.title = habilitado ? (btn.getAttribute('title') || '') : 'Primero registra Peso 1 en un clamshell';
                 });
             }
-            const logisticaBlock = document.querySelector('.logistica-acopio-block');
-            const logisticaHead = document.querySelector('.logistica-acopio-head');
-            if (logisticaBlock) logisticaBlock.classList.toggle('is-locked', !habilitado);
-            if (logisticaHead) logisticaHead.setAttribute('data-locked', habilitado ? '0' : '1');
+            document.querySelectorAll('.logistica-acopio-block').forEach((block) => {
+                block.classList.toggle('is-locked', !habilitado);
+            });
+            document.querySelectorAll('.logistica-acopio-head').forEach((head) => {
+                head.setAttribute('data-locked', habilitado ? '0' : '1');
+            });
         }
 
         async function eliminarClamshell(event, itemId) {
@@ -3371,6 +3460,13 @@
             return `${y}-${m}-${day}`;
         }
 
+        function horaLocalActual() {
+            const d = new Date();
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return `${hh}:${mm}`;
+        }
+
         function numeroDesdeEnsayoTexto(ensayoTxt) {
             const txt = String(ensayoTxt || '').trim();
             const m = txt.match(/\d+/);
@@ -3382,7 +3478,7 @@
             return String(v).trim();
         }
 
-        function construirFilaBaseRegistro(item, idx, totalItemsEnLote) {
+        function construirFilaBaseRegistro(item, idx, totalItemsEnLote, horaRegistro) {
             const ensayoNombre = strOrEmpty(item?.ensayo || obtenerEnsayoActivo() || 'Ensayo 1');
             const ensayoNumero = numeroDesdeEnsayoTexto(ensayoNombre);
             const meta = metaPorEnsayo[ensayoNombre] || {};
@@ -3444,13 +3540,15 @@
                 strOrEmpty(temp.presionFrutaTermino), // PRESION_FRUTA_TERMINO
                 strOrEmpty(temp.presionFrutaLlegada), // PRESION_FRUTA_LLEGADA
                 strOrEmpty(temp.presionFrutaDespacho), // PRESION_FRUTA_DESPACHO
-                strOrEmpty(item?.observacion) // OBSERVACION
+                strOrEmpty(item?.observacion), // OBSERVACION
+                strOrEmpty(meta['visual-observacion-formato'] || document.getElementById('visual-observacion-formato')?.value), // OBSERVACION_FORMATO
+                strOrEmpty(horaRegistro) // HORA_REGISTRO
             ];
         }
 
         /**
          * Hoja 2: INICIO_C/TERMINO_C/MIN_C = fila Cosecha de esa jarra; INICIO_T/TERMINO_T/MIN_T = fila Trasvasado (mismo concepto).
-         * Se envían en el hueco 20-25 de una fila de 52 (el servidor hace toRowRegistro y copia a Hoja 2).
+         * Se envían en el hueco 20-25 de una fila de 54 (el servidor hace toRowRegistro y copia a Hoja 2).
          */
         function minutosDiferenciaHorasHoja2(horaIni, horaFin) {
             if (!horaIni || !horaFin) return '';
@@ -3483,14 +3581,14 @@
             ];
         }
 
-        /** 52 celdas: 20 + hueco Hoja2 (6) + 26 = misma convención que code.gs toRowRegistro. */
-        function construirFilaPost52ConHoja2(item, idx, totalEnLote) {
-            const f46 = construirFilaBaseRegistro(item, idx, totalEnLote);
+        /** 54 celdas: 20 + hueco Hoja2 (6) + 28 = misma convención que code.gs toRowRegistro. */
+        function construirFilaPost54ConHoja2(item, idx, totalEnLote, horaRegistro) {
+            const f48 = construirFilaBaseRegistro(item, idx, totalEnLote, horaRegistro);
             const h6 = seisCeldasHoja2DesdeLlenadoJarras(String(item.ensayo || 'Ensayo 1'), item?.jarra);
-            return f46.slice(0, 20).concat(h6, f46.slice(20, 46));
+            return f48.slice(0, 20).concat(h6, f48.slice(20, 48));
         }
 
-        // Avance etapa 1: filas para POST (52 cols con tiempos Hoja 2 desde panel jarras, no desde métricas de fila).
+        // Avance etapa 1: filas para POST (54 cols con tiempos Hoja 2 desde panel jarras, no desde métricas de fila).
         function construirRowsRegistroBasePorEnsayo(ensayoObjetivo) {
             const ensayo = String(ensayoObjetivo || obtenerEnsayoActivo() || 'Ensayo 1');
             const items = data
@@ -3498,7 +3596,8 @@
                 .slice()
                 .sort((a, b) => Number(a.id) - Number(b.id));
             const n = items.length;
-            return items.map((item, idx) => construirFilaPost52ConHoja2(item, idx, n));
+            const horaRegistro = horaLocalActual();
+            return items.map((item, idx) => construirFilaPost54ConHoja2(item, idx, n, horaRegistro));
         }
         function construirRowsRegistroBase() {
             return construirRowsRegistroBasePorEnsayo(obtenerEnsayoActivo());
@@ -3514,6 +3613,7 @@
             'visual-traz-etapa',
             'visual-traz-campo',
             'visual-traz-turno',
+            'visual-traz-acopio',
             'visual-meta-variedad',
             'visual-guia-acopio',
             'visual-placa-vehiculo',
@@ -3549,7 +3649,8 @@
             'visual-presionfruta-1-presionfrutadespacho-4',
             'visual-observation',
             'visual-guia-acopio',
-            'visual-placa-vehiculo'
+            'visual-placa-vehiculo',
+            'visual-observacion-formato'
         ];
 
         const LEGACY_INPUT_IDS = {
@@ -3646,8 +3747,48 @@
 
         function guardarDraftCompleto() {
             try {
+                snapshotMetaEnsayoActual();
+                sincronizarTrazabilidadCompuesta();
                 localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(capturarDraftCompleto()));
             } catch (_) { /* ignore */ }
+        }
+
+        function fusionarParcelaCriticosEnMeta(ensayo, inputs) {
+            if (!inputs || typeof inputs !== 'object') return;
+            const k = String(ensayo || '').trim();
+            if (!k) return;
+            if (!metaPorEnsayo[k]) metaPorEnsayo[k] = {};
+            const meta = metaPorEnsayo[k];
+            const ids = [
+                'visual-meta-fundo', 'visual-traz-etapa', 'visual-traz-campo',
+                'visual-traz-turno', 'visual-traz-acopio', 'visual-meta-variedad', 'visual-trazabilidad'
+            ];
+            ids.forEach((id) => {
+                const vCrit = String(inputs[id] ?? '').trim();
+                const vMeta = String(meta[id] ?? '').trim();
+                if (vCrit && !vMeta) meta[id] = vCrit;
+            });
+        }
+
+        function reaplicarCatalogoYMetaGuardada() {
+            const ensayo = ensayoActivo || metaActivoEnsayo || obtenerEnsayoActivo() || 'Ensayo 1';
+            snapshotMetaEnsayoActual(ensayo);
+            const tieneMeta = metaPorEnsayo[ensayo] && ensayoMetaTieneDatosTrabajo(ensayo);
+            if (tieneMeta) {
+                cargarMetaDeEnsayo(ensayo);
+            } else {
+                actualizarBloqueoTrazabilidadPorFundo();
+                if (typeof window.refrescarSelectsCatalogoCampo === 'function') {
+                    window.refrescarSelectsCatalogoCampo();
+                }
+                sincronizarTrazabilidadCompuesta();
+                sincronizarChipsDesdeAlmacenamiento();
+                actualizarVistaCompacta();
+                actualizarProgresoMeta();
+            }
+            asegurarOpcionesSelectAcopio(metaPorEnsayo[ensayo]?.['visual-traz-acopio']);
+            snapshotMetaEnsayoActual(ensayo);
+            programarGuardadoMeta();
         }
 
         function hayTextoNoVacioEnObjeto(obj) {
@@ -3701,7 +3842,19 @@
                     delete d.inputsCriticos['visual-num-muestra'];
                     delete d.inputsCriticos.numMuestra;
                 }
+                const ensayoDraft = String(d.ensayoActivo || ensayoActivo || metaActivoEnsayo || 'Ensayo 1').trim() || 'Ensayo 1';
+                fusionarParcelaCriticosEnMeta(ensayoDraft, d.inputsCriticos);
                 aplicarInputsCriticosGuardados(d.inputsCriticos);
+                metaActivoEnsayo = ensayoDraft;
+                snapshotMetaEnsayoActual(ensayoDraft);
+                if (typeof window.aplicarParcelaCampoDesdeMeta === 'function') {
+                    window.aplicarParcelaCampoDesdeMeta(metaPorEnsayo[ensayoDraft] || {});
+                }
+                asegurarOpcionesSelectAcopio(
+                    d.inputsCriticos?.['visual-traz-acopio']
+                    || metaPorEnsayo[ensayoDraft]?.['visual-traz-acopio']
+                );
+                sincronizarTrazabilidadCompuesta();
                 return true;
             } catch (_) { /* ignore */ }
             return false;
@@ -3937,7 +4090,7 @@
             renderizarTarjetas();
             actualizarBarraHeaderEstado();
             actualizarBloqueoControlesPorPeso1();
-            document.querySelector('.logistica-acopio-block')?.removeAttribute('open');
+            document.querySelectorAll('.logistica-acopio-block').forEach((block) => block.removeAttribute('open'));
             document.querySelector('.llenado-jarras-wrapper')?.removeAttribute('open');
             return muestraPreservada;
         }
@@ -3986,7 +4139,7 @@
                 'visual-traz-etapa': 'E2',
                 'visual-traz-campo': 'C3',
                 'visual-traz-turno': 'T1',
-                'visual-meta-variedad': 'Júpiter',
+                'visual-meta-variedad': 'Jupiter Blue',
                 'visual-guia-acopio': '208353',
                 'visual-placa-vehiculo': '9967-OK',
                 'visual-trazabilidad': 'E2-C3-T1'
@@ -5358,6 +5511,42 @@
                     const reg = queue[i];
                     if (!reg || String(reg.estado || '') !== 'pendiente') continue;
 
+                    const esPackingCola = String(reg.modo || reg.payload?.mode || '') === 'packing';
+                    if (esPackingCola) {
+                        const bodyPk = reg.payload;
+                        if (!bodyPk || !Array.isArray(bodyPk.packingRows) || !bodyPk.packingRows.length) {
+                            reg.estado = 'bloqueado';
+                            reg.error = 'Payload packing vacío';
+                            reg.actualizado_en = Date.now();
+                            huboCambios = true;
+                            pushEstadoSync(reg);
+                            continue;
+                        }
+                        reg.intentos = Number(reg.intentos || 0) + 1;
+                        reg.actualizado_en = Date.now();
+                        try {
+                            await fetch(API_URL, {
+                                method: 'POST',
+                                mode: 'no-cors',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(bodyPk)
+                            });
+                            reg.estado = 'subido';
+                            reg.error = '';
+                            pushEstadoSync(reg);
+                            queue.splice(i, 1);
+                            i--;
+                            huboCambios = true;
+                            mostrarToast('success', 'Cola packing', 'Packing de muestra ' + (reg.num_muestra || '') + ' enviado.');
+                        } catch (errPk) {
+                            reg.error = String(errPk?.message || errPk || 'Error POST packing');
+                            reg.actualizado_en = Date.now();
+                            huboCambios = true;
+                            pushEstadoSync(reg);
+                        }
+                        continue;
+                    }
+
                     // Si el código ya existe en la hoja, reasignar N° muestra automático y reintentar (evita duplicados).
                     if (reg.num_muestra) {
                         const numInfoPre = await existeNumMuestraServidor(reg.num_muestra);
@@ -6264,6 +6453,7 @@
 
         window.addEventListener('online', () => {
             offlineAlertShown = false;
+            cerrarAlertaModoOfflineSiAbierta();
             actualizarHeaderConexionUI();
             purgarCacheNumMuestraLocalStorage();
             void refrescarEstadoServidorOperativo(true).then((ok) => {
@@ -6283,11 +6473,13 @@
         window.addEventListener('offline', () => {
             actualizarHeaderConexionUI();
             refrescarEstadoOperativoLocal();
+            asegurarOpcionesSelectAcopio();
             mostrarAlertaModoOffline();
         });
 
         const draftRestaurado = restaurarDraftCompleto();
         purgarTodosNumerosMuestraEnMeta();
+        setTimeout(() => reaplicarCatalogoYMetaGuardada(), 0);
         reconstruirEnsayosEnUsoSesionDesdeEstado();
         ensayoActivo = obtenerEnsayoActivo();
         recalcularPresionesParaTodos();
@@ -6403,7 +6595,11 @@
             }
             void refrescarEstadoServidorOperativo(true);
         });
-        if (!navigator.onLine) mostrarAlertaModoOffline();
+        if (!navigator.onLine) {
+            setTimeout(() => {
+                if (!navigator.onLine) mostrarAlertaModoOffline();
+            }, 400);
+        }
         sincronizarPendientes();
         if (draftRestaurado) {
             setTimeout(() => {
@@ -6429,4 +6625,229 @@
         setInterval(() => {
             programarGuardadoDraftCompleto();
         }, 5000);
+
+        function fechaDisplayDdMmYyyy(iso) {
+            const p = String(iso || hoyIsoLocal()).split('-');
+            if (p.length !== 3) return String(iso || '');
+            return `${p[2]}-${p[1]}-${p[0]}`;
+        }
+
+        function trazabilidadTextoDesdeMeta(meta) {
+            return trazabilidadTextoMostrar(meta);
+        }
+
+        /** Hora en PDF como el formato físico (8:32 en lugar de 08:32). */
+        function formatoHoraPdf(hora) {
+            const s = strOrEmpty(hora);
+            if (!s || !s.includes(':')) return s;
+            const [h, m] = s.split(':');
+            const hh = Number(h);
+            if (Number.isNaN(hh)) return s;
+            return `${hh}:${String(m || '00').padStart(2, '0')}`;
+        }
+
+        function listaJarrasParaPdfLlenado(ensayo, items) {
+            const seen = new Set();
+            const out = [];
+            const agregar = (n) => {
+                const num = Number(n);
+                if (!Number.isFinite(num) || num <= 0 || seen.has(num)) return;
+                seen.add(num);
+                out.push(num);
+            };
+            ordenVisualFilasJarras(obtenerFilasLlenadoJarras(ensayo)).forEach((f) => {
+                const r = parseRangoJarraLlenado(f.jarra);
+                if (r) {
+                    agregar(r.a);
+                    agregar(r.b);
+                    return;
+                }
+                agregar(f.jarra);
+            });
+            items.forEach((it) => agregar(it.jarra));
+            return out.sort((a, b) => a - b).slice(0, 6);
+        }
+
+        /** Columnas de llenado de jarras: cosecha / traslado alternados (como formato físico). */
+        function celdasLlenadoJarraPdf(cRow, tRow, esCosecha, nJarra) {
+            if (esCosecha) {
+                return {
+                    jarraLlenado: String(nJarra),
+                    trasladoObs: 'Cosecha',
+                    jarraInicio: formatoHoraPdf(cRow?.inicio),
+                    jarraTermino: formatoHoraPdf(cRow?.termino),
+                    jarraTiempo: cRow ? calcularTiempoEmpleado(cRow.inicio, cRow.termino) : ''
+                };
+            }
+            return {
+                jarraLlenado: '-',
+                trasladoObs: 'Traslado',
+                jarraInicio: formatoHoraPdf(tRow?.inicio),
+                jarraTermino: formatoHoraPdf(tRow?.termino),
+                jarraTiempo: tRow ? calcularTiempoEmpleado(tRow.inicio, tRow.termino) : ''
+            };
+        }
+
+        function filaPdfVaciaLlenadoJarras() {
+            return {
+                nClam: '',
+                jarra: '',
+                p1: '', p2: '', p3: '', p4: '', p5: '',
+                llegada: '', despacho: '',
+                tInicioCosecha: '', tPerdida: '', tTermino: '', tLlegada: '', tDespacho: '',
+                tempInicioAmb: '', tempInicioPul: '', tempTerminoAmb: '', tempTerminoPul: '',
+                tempLlegadaAmb: '', tempLlegadaPul: '', tempDespachoAmb: '', tempDespachoPul: '',
+                jarraLlenado: '', trasladoObs: '', jarraInicio: '', jarraTermino: '', jarraTiempo: '',
+                observacion: ''
+            };
+        }
+
+        const MAX_CLAMSHELLS_PDF = 8;
+
+        function filaPdfDesdeItem(item, nClam, incluirTemperatura) {
+            const m = item?.metric || metricaVacia();
+            const t = m.tiempo || {};
+            const temp = m.temperatura || {};
+            const vacioTemp = {
+                tempInicioAmb: '', tempInicioPul: '',
+                tempTerminoAmb: '', tempTerminoPul: '',
+                tempLlegadaAmb: '', tempLlegadaPul: '',
+                tempDespachoAmb: '', tempDespachoPul: ''
+            };
+            const temps = incluirTemperatura ? {
+                tempInicioAmb: strOrEmpty(temp.inicioAmbiente),
+                tempInicioPul: strOrEmpty(temp.inicioPulpa),
+                tempTerminoAmb: strOrEmpty(temp.terminoAmbiente),
+                tempTerminoPul: strOrEmpty(temp.terminoPulpa),
+                tempLlegadaAmb: strOrEmpty(temp.llegadaAmbiente),
+                tempLlegadaPul: strOrEmpty(temp.llegadaPulpa),
+                tempDespachoAmb: strOrEmpty(temp.despachoAmbiente),
+                tempDespachoPul: strOrEmpty(temp.despachoPulpa)
+            } : vacioTemp;
+            return {
+                nClam,
+                jarra: item ? strOrEmpty(item.jarra) : '',
+                p1: item ? strOrEmpty(item.p1) : '',
+                p2: item ? strOrEmpty(item.p2) : '',
+                p3: '', p4: '', p5: '',
+                llegada: item ? strOrEmpty(item.acopio) : '',
+                despacho: item ? strOrEmpty(item.despacho) : '',
+                tInicioCosecha: strOrEmpty(t.inicioCosecha),
+                tPerdida: strOrEmpty(t.inicioPerdida),
+                tTermino: strOrEmpty(t.terminoCosecha),
+                tLlegada: strOrEmpty(t.llegadaAcopio),
+                tDespacho: strOrEmpty(t.despachoAcopio),
+                ...temps,
+                observacion: item ? strOrEmpty(item.observacion) : ''
+            };
+        }
+
+        window.obtenerDatosPdfCampo = function obtenerDatosPdfCampo() {
+            snapshotMetaEnsayoActual();
+            const ensayo = obtenerEnsayoActivo();
+            recalcularPresionesParaEnsayo(ensayo);
+            const meta = { ...(metaPorEnsayo[ensayo] || leerMetaFormulario()) };
+            const items = data
+                .filter((it) => String(it.ensayo || 'Ensayo 1') === ensayo)
+                .slice()
+                .sort((a, b) => Number(a.id) - Number(b.id));
+            const lider = items[0];
+            const ml = lider?.metric || metricaVacia();
+            const tempL = ml.temperatura || {};
+            const humL = ml.humedad || {};
+            const jarrasPdf = listaJarrasParaPdfLlenado(ensayo, items);
+            const maxRows = 12;
+            const filas = [];
+            const llenadoVacio = {
+                jarraLlenado: '', trasladoObs: '', jarraInicio: '', jarraTermino: '', jarraTiempo: ''
+            };
+            for (let r = 0; r < maxRows; r++) {
+                // Clamshells 1–8: una fila cada uno (sin repetir 1,1, 2,2…).
+                const base = r < MAX_CLAMSHELLS_PDF
+                    ? filaPdfDesdeItem(items[r] || null, r + 1, r === 0)
+                    : filaPdfVaciaLlenadoJarras();
+
+                // Llenado de jarras: cosecha/traslado alternado por jarra (independiente del n° clamshell).
+                const parIdxJarra = Math.floor(r / 2);
+                const esCosechaJarra = r % 2 === 0;
+                const nJarra = jarrasPdf[parIdxJarra];
+                const llenado = nJarra
+                    ? celdasLlenadoJarraPdf(
+                        filaCosechaParaJarra(ensayo, nJarra, -1),
+                        filaTrasladoQueAplicaAJarra(ensayo, nJarra, -1),
+                        esCosechaJarra,
+                        nJarra
+                    )
+                    : llenadoVacio;
+
+                filas.push({ ...base, ...llenado });
+            }
+            const obsPartes = items.map((it) => strOrEmpty(it.observacion)).filter(Boolean);
+            const guiaAcopio = strOrEmpty(
+                meta['visual-guia-acopio']
+                || ensayoMeta[ensayo]?.guiaRemision
+                || document.getElementById('visual-guia-acopio')?.value
+            );
+            const placa = strOrEmpty(
+                meta['visual-placa-vehiculo']
+                || ensayoMeta[ensayo]?.placaVehiculo
+                || document.getElementById('visual-placa-vehiculo')?.value
+            ).toUpperCase();
+            return {
+                ensayo,
+                fecha: fechaDisplayDdMmYyyy(hoyIsoLocal()),
+                empresa: 'AGROVISION',
+                codigo: 'PE-F-QPH-306',
+                version: '1',
+                tituloHoja1: 'FORMATO MEDICIÓN DE TIEMPOS, TEMPERATURA Y PESOS EN COSECHA ARÁNDANO - C5-C6-A9-LN',
+                tituloHoja2: 'FORMATO MEDICIÓN DE TIEMPOS, TEMPERATURA Y PESOS EN COSECHA ARÁNDANO - CS-C6-A9-LN',
+                meta: {
+                    fecha: fechaDisplayDdMmYyyy(hoyIsoLocal()),
+                    trazabilidad: trazabilidadTextoDesdeMeta(meta),
+                    trazabilidadArchivo: trazabilidadBaseDesdeMeta(meta),
+                    responsable: strOrEmpty(meta['visual-responsable']),
+                    guiaRemision: guiaAcopio,
+                    rotulo: strOrEmpty(meta['visual-rotulo'] || ensayo),
+                    placa,
+                    variedad: strOrEmpty(meta['visual-meta-variedad'] || meta['meta-variedad']),
+                    precosecha: strOrEmpty(meta['visual-guia-precosecha']),
+                    horaInicio: strOrEmpty(meta['visual-hora']),
+                    numMuestra: strOrEmpty(leerNumMuestraDesdePantalla(ensayo))
+                },
+                filas,
+                pagina2: {
+                    humedad: [
+                        strOrEmpty(humL.inicio),
+                        strOrEmpty(humL.termino),
+                        strOrEmpty(humL.llegada),
+                        strOrEmpty(humL.despacho)
+                    ],
+                    tempAmbiente: [
+                        strOrEmpty(tempL.inicioAmbiente),
+                        strOrEmpty(tempL.terminoAmbiente),
+                        strOrEmpty(tempL.llegadaAmbiente),
+                        strOrEmpty(tempL.despachoAmbiente)
+                    ],
+                    presionAmb: [
+                        strOrEmpty(tempL.presionAmbienteInicio),
+                        strOrEmpty(tempL.presionAmbienteTermino),
+                        strOrEmpty(tempL.presionAmbienteLlegada),
+                        strOrEmpty(tempL.presionAmbienteDespacho)
+                    ],
+                    presionFruta: [
+                        strOrEmpty(tempL.presionFrutaInicio),
+                        strOrEmpty(tempL.presionFrutaTermino),
+                        strOrEmpty(tempL.presionFrutaLlegada),
+                        strOrEmpty(tempL.presionFrutaDespacho)
+                    ],
+                    observaciones: obsPartes.join(' · '),
+                    observacionesLista: items.map((it) => strOrEmpty(it.observacion))
+                },
+                observacionesFormato: strOrEmpty(
+                    document.getElementById('visual-observacion-formato')?.value
+                    || meta['visual-observacion-formato']
+                ),
+                horaPesado: ''
+            };
+        };
 

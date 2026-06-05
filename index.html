@@ -122,42 +122,50 @@
                         </div>
 
                         <div class="meta-block">
-                            <label class="meta-block-title" for="visual-meta-fundo" style="margin-bottom: 8px;">Fundo</label>
-                            <select class="meta-inp" id="visual-meta-fundo" name="fundo">
-                                <option value="">Seleccionar</option>
-                                <option value="LN">LN</option>
-                                <option value="C5">C5</option>
-                                <option value="C6">C6</option>
-                                <option value="LN-2">LN</option>
-                            </select>
+                            <span class="meta-block-title" style="display:block;margin-bottom:8px;">Fundo</span>
+                            <div class="meta-row-fundo-acopio">
+                                <select class="meta-inp" id="visual-meta-fundo" name="fundo" aria-label="Fundo">
+                                    <option value="">Seleccionar</option>
+                                </select>
+                                <select class="meta-inp meta-inp--acopio" id="visual-traz-acopio" name="trazAcopio" aria-label="Acopio">
+                                    <option value="">Acopio</option>
+                                    <option value="Acopio 1">Acopio 1</option>
+                                    <option value="Acopio 2">Acopio 2</option>
+                                    <option value="Acopio 3">Acopio 3</option>
+                                    <option value="Acopio 4">Acopio 4</option>
+                                    <option value="Acopio 5">Acopio 5</option>
+                                    <option value="Acopio 6">Acopio 6</option>
+                                    <option value="Acopio 7">Acopio 7</option>
+                                    <option value="Acopio 8">Acopio 8</option>
+                                    <option value="Acopio 9">Acopio 9</option>
+                                    <option value="Acopio 10">Acopio 10</option>
+                                    <option value="Acopio 11">Acopio 11</option>
+                                    <option value="Acopio 12">Acopio 12</option>
+                                    <option value="Acopio 13">Acopio 13</option>
+                                    <option value="Acopio 14">Acopio 14</option>
+                                    <option value="Acopio 15">Acopio 15</option>
+                                    <option value="Acopio 16">Acopio 16</option>
+                                    <option value="Acopio 17">Acopio 17</option>
+                                    <option value="Acopio 18">Acopio 18</option>
+                                    <option value="Acopio 19">Acopio 19</option>
+                                    <option value="Acopio 20">Acopio 20</option>
+                                    <option value="Acopio 21">Acopio 21</option>
+                                    <option value="Acopio 22">Acopio 22</option>
+                                    <option value="Acopio 23">Acopio 23</option>
+                                    <option value="Acopio 24">Acopio 24</option>
+                                    <option value="Acopio 25">Acopio 25</option>
+                                </select>
+                            </div>
                         </div>
 
                         <div class="meta-block">
                             <span class="meta-block-title" style="display:block;margin-bottom:8px;">Trazabilidad</span>
                             <div class="meta-row-3">
-                                <select class="meta-inp" id="visual-traz-etapa" name="trazEtapa">
+                                <select class="meta-inp" id="visual-traz-etapa" name="trazEtapa" aria-label="Etapa">
                                     <option value="">Etapa</option>
-                                    <option value="E1">E1</option>
-                                    <option value="E2">E2</option>
-                                    <option value="E3">E3</option>
-                                    <option value="E4">E4</option>
-                                    <option value="E5">E5</option>
-                                    <option value="E6">E6</option>
-                                    <option value="E7">E7</option>
-                                    <option value="E8">E8</option>
-                                    <option value="E9">E9</option>
                                 </select>
-                                <select class="meta-inp" id="visual-traz-campo" name="trazCampo">
+                                <select class="meta-inp" id="visual-traz-campo" name="trazCampo" aria-label="Campo">
                                     <option value="">Campo</option>
-                                    <option value="C1">C1</option>
-                                    <option value="C2">C2</option>
-                                    <option value="C3">C3</option>
-                                    <option value="C4">C4</option>
-                                    <option value="C5">C5</option>
-                                    <option value="C6">C6</option>
-                                    <option value="C7">C7</option>
-                                    <option value="C8">C8</option>
-                                    <option value="C9">C9</option>
                                 </select>
                                 <input class="meta-inp" id="visual-traz-turno" name="trazTurno" type="text" placeholder="Turno" autocomplete="off">
                             </div>
@@ -166,12 +174,14 @@
 
                         <div class="meta-block">
                             <label class="meta-block-title" for="visual-meta-variedad" style="margin-bottom: 8px;">Variedad</label>
-                            <select class="meta-inp" id="visual-meta-variedad" name="variedad">
+                            <select class="meta-inp" id="visual-meta-variedad" name="variedad" aria-describedby="visual-meta-variedad-hint">
                                 <option value="">Seleccionar</option>
-                                <option value="Júpiter">Júpiter</option>
-                                <option value="Sweet Celebration">Sweet Celebration</option>
-                                <option value="Legacy">Legacy</option>
                             </select>
+                            <details class="meta-variedades-ref" id="visual-variedades-referencia">
+                                <summary>OTRAS VARIEDADES <span class="meta-variedades-ref-count" id="visual-variedades-ref-count">(0)</span></summary>
+                                <ul class="meta-variedades-ref-list" id="visual-variedades-referencia-list"></ul>
+                            </details>
+                            <span id="visual-meta-variedad-hint" class="meta-hint">Select arriba o elige en «Otras variedades» si no está en la parcela.</span>
                         </div>
                     </form>
                 </div>
@@ -207,7 +217,26 @@
         </div>
         <div id="cards-container"></div>
 
-        <details class="logistica-acopio-block" aria-label="Despacho acopio: guía y placa">
+        <details class="logistica-acopio-block logistica-formato-block" aria-label="Comentarios de formato">
+            <summary class="logistica-acopio-head">
+                <div class="control-equitativo-btn logistica-acopio-icon-slot logistica-formato-icon-wrap" title="Formato" aria-hidden="true">
+                    <i data-lucide="file-text"></i>
+                </div>
+                <div class="control-equitativo-label logistica-acopio-label">
+                    <b>Comentarios de formato</b>
+                    <span>Observación general para el pie OBSERVACIONES del formato</span>
+                </div>
+                <span class="logistica-acopio-chev" aria-hidden="true"></span>
+            </summary>
+            <div class="logistica-acopio-body">
+                <div class="logistica-acopio-field">
+                    <label class="meta-block-title" for="visual-observacion-formato">Observación formato</label>
+                    <textarea class="meta-inp logistica-formato-ta" id="visual-observacion-formato" name="observacionFormato" rows="3" placeholder="Opcional: comentario general del formato" autocomplete="off"></textarea>
+                </div>
+            </div>
+        </details>
+
+        <details class="logistica-acopio-block logistica-despacho-block" aria-label="Despacho acopio: guía y placa">
             <summary class="logistica-acopio-head">
                 <div class="control-equitativo-btn logistica-acopio-icon-slot logistica-acopio-truck-wrap" title="Transporte" aria-hidden="true">
                     <i data-lucide="truck"></i>
@@ -247,17 +276,22 @@
             <button class="fab-mini fab-mini--danger" onclick="borrarTodoYCacheRapido()" aria-label="Eliminar todo y caché local" title="Forzar reinicio: borra todo lo local y recarga">
                 <i data-lucide="trash-2"></i>
             </button>
-            <button class="fab-mini" onclick="abrirModalResumenGlobal()" aria-label="Resumen despacho acopio-campo">
-                <i data-lucide="truck"></i>
-            </button>
+            <div class="fab-menu-duo">
+                <button type="button" class="fab-mini fab-mini--registro" id="fab-btn-iniciar-registro" onclick="fabIniciarRegistroDesdeFab()" aria-label="Cargar datos de prueba (simulación)" title="Rellena meta, 8 clamshell y jarras de ejemplo para probar y enviar">
+                    <i data-lucide="clipboard-list"></i>
+                </button>
+                <button type="button" class="fab-mini" onclick="abrirModalResumenGlobal()" aria-label="Resumen despacho acopio-campo">
+                    <i data-lucide="truck"></i>
+                </button>
+            </div>
             <button class="fab" onclick="abrirModal('Nuevo Registro')" aria-label="Nuevo registro">
                 <svg class="fab-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 5v14M5 12h14"></path>
                 </svg>
             </button>
         </div>
-        <button type="button" class="fab-mini fab-mini--registro" id="fab-btn-iniciar-registro" onclick="fabIniciarRegistroDesdeFab()" aria-label="Cargar datos de prueba (simulación)" title="Rellena meta, 8 clamshell y jarras de ejemplo para probar y enviar">
-            <i data-lucide="clipboard-list"></i>
+        <button type="button" class="fab-pdf" id="fab-pdf-btn" aria-label="Generar PDF del registro">
+            <i data-lucide="file-text"></i>
         </button>
         <div class="fecha-ring-widget fecha-ring-widget--fab fecha-ring-widget--campo" id="visual-fecha-ring-widget" role="button" tabindex="0" aria-label="Fecha de hoy" title="">
             <div class="fecha-ring-circle" id="campo-fecha-ring-circle" aria-hidden="true"></div>
@@ -378,6 +412,28 @@
         </div>
     </div>
 
+    <div class="modal-overlay pdf-modal-overlay" id="pdf-modal-overlay" role="dialog" aria-labelledby="pdf-modal-title" aria-modal="true">
+        <div class="modal-content pdf-modal-content">
+            <div class="pdf-modal-head">
+                <h2 id="pdf-modal-title">Vista previa PDF</h2>
+                <button type="button" class="pdf-modal-close" id="pdf-btn-cerrar" aria-label="Cerrar vista previa">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <iframe class="pdf-preview-frame" id="pdf-preview-iframe" title="Vista previa del formato Agrovision"></iframe>
+            <div class="pdf-modal-actions">
+                <button type="button" class="btn-save pdf-action-btn" id="pdf-btn-descargar">
+                    <i data-lucide="download"></i>
+                    Descargar
+                </button>
+                <button type="button" class="btn-save pdf-action-btn pdf-action-btn--wsp" id="pdf-btn-wsp">
+                    <i data-lucide="message-circle"></i>
+                    WhatsApp
+                </button>
+            </div>
+        </div>
+    </div>
+
     <nav id="main-bottom-nav">
         <a class="nav-btn nav-link active" id="nav-campo" data-nav-index="0" href="./" aria-label="Campo">
             <i data-lucide="house"></i>
@@ -397,11 +453,15 @@
         </a>
     </nav>
 
+    <script src="./mapeo-parcelas-data.js"></script>
+    <script src="./catalogo-json.js"></script>
     <script src="./librerias/lucide.min.js"></script>
     <script src="./librerias/sweetalert2.all.min.js"></script>
     <script src="./librerias/flatpickr.min.js"></script>
     <script src="./librerias/flatpickr-l10n-es.js"></script>
     <script src="./app.js" charset="utf-8"></script>
+    <script src="./librerias/jspdf.umd.min.js"></script>
+    <script src="./campo-pdf.js"></script>
     <script src="./network.js"></script>
     <script src="./script.js"></script>
 </body>

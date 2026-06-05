@@ -2,6 +2,8 @@
     const API_URL = (String(window.APPS_SCRIPT_API_URL || '').trim()
         || 'https://script.google.com/macros/s/AKfycbwdC1lwuGNT01xfLE_0jI31oXU13rBinYPKwlVfkZwqmIJGqSRuvPnq4-A9b6tHZThN/exec');
     const SYNC_QUEUE_KEY = 'tiempos-sync-queue-v1';
+    const SYNC_HISTORY_KEY = 'tiempos-sync-history-v1';
+    const SYNC_MAX_HISTORY = 200;
     const PACKING_DRAFT_STORAGE_KEY = 'tiempos-packing-draft-v1';
     const PACKING_CHIPS_COLLAPSED_KEY = 'packing-chips-collapsed-v1';
     const MIN_LOADER_MS = 350;
@@ -1862,6 +1864,203 @@
         });
     }
 
+    function uidLocalPacking() {
+        return 'pk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    }
+
+    function cargarColaSyncPacking() {
+        try {
+            const raw = localStorage.getItem(SYNC_QUEUE_KEY);
+            if (!raw) return [];
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+        } catch (_) {
+            return [];
+        }
+    }
+
+    function guardarColaSyncPacking(queue) {
+        try {
+            localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(Array.isArray(queue) ? queue : []));
+        } catch (_) { /* ignore */ }
+    }
+
+    function pushEstadoSyncPacking(reg) {
+        try {
+            const raw = localStorage.getItem(SYNC_HISTORY_KEY);
+            const arr = raw ? JSON.parse(raw) : [];
+            const hist = Array.isArray(arr) ? arr : [];
+            hist.push({
+                uid: reg.uid,
+                estado: reg.estado,
+                ts: Date.now(),
+                ensayo: String(reg.ensayo_numero || reg.ensayo || ''),
+                num_muestra: reg.num_muestra || '',
+                fecha: reg.fecha || '',
+                error: reg.error || '',
+                modo: 'packing'
+            });
+            localStorage.setItem(SYNC_HISTORY_KEY, JSON.stringify(hist.slice(-SYNC_MAX_HISTORY)));
+        } catch (_) { /* ignore */ }
+    }
+
+    function esRegistroColaPacking(reg) {
+        return String(reg?.modo || reg?.payload?.mode || '') === 'packing';
+    }
+
+    function hayPackingPendienteEnCola(fecha, ensayoNumero, numMuestra) {
+        const f = String(fecha || '').trim();
+        const en = String(ensayoNumero || '').trim();
+        const nm = String(numMuestra || '').trim();
+        return cargarColaSyncPacking().some((r) => {
+            if (String(r?.estado || '') !== 'pendiente' || !esRegistroColaPacking(r)) return false;
+            return String(r.fecha || '') === f
+                && String(r.ensayo_numero || '') === en
+                && String(r.num_muestra || '') === nm;
+        });
+    }
+
+    function encolarPackingPendiente(payload) {
+        const body = payload || getMetaEnvioPacking();
+        const f = String(body.fecha || '').trim();
+        const en = String(body.ensayo_numero || '').trim();
+        const nm = String(body.num_muestra || '').trim();
+        if (hayPackingPendienteEnCola(f, en, nm)) {
+            return { duplicado: true };
+        }
+        const reg = {
+            uid: uidLocalPacking(),
+            modo: 'packing',
+            payload: body,
+            fecha: f,
+            ensayo_numero: en,
+            num_muestra: nm,
+            ensayo: en,
+            estado: 'pendiente',
+            intentos: 0,
+            creado_en: Date.now(),
+            actualizado_en: Date.now(),
+            error: ''
+        };
+        const queue = cargarColaSyncPacking();
+        queue.push(reg);
+        guardarColaSyncPacking(queue);
+        pushEstadoSyncPacking(reg);
+        actualizarHeaderPendientes();
+        return reg;
+    }
+
+    let syncPackingEnCurso = false;
+
+    async function confirmarPackingEnServidorTrasPost_(reg) {
+        const p = reg?.payload || {};
+        const fecha = String(p.fecha || '').trim();
+        const ensayo = String(p.ensayo_numero || '').trim();
+        if (!fecha || !ensayo || !API_URL) return false;
+        try {
+            const r = await callbackJsonp({ fecha: fecha, ensayo_numero: ensayo });
+            if (!r || r.ok !== true || !r.data) return false;
+            const hechas = Number(r.data.FILAS_PACKING_REGISTRADAS ?? 0);
+            const start = Number(p.packing_start_index ?? 0);
+            const filas = Array.isArray(p.packingRows) ? p.packingRows.length : 0;
+            return hechas >= start + filas;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    async function sincronizarPendientesPacking() {
+        if (syncPackingEnCurso) return;
+        if (!navigator.onLine || !API_URL) {
+            actualizarHeaderPendientes();
+            return;
+        }
+        const queue = cargarColaSyncPacking();
+        if (!queue.some((r) => String(r?.estado || '') === 'pendiente' && esRegistroColaPacking(r))) {
+            actualizarHeaderPendientes();
+            return;
+        }
+        syncPackingEnCurso = true;
+        let huboCambios = false;
+        try {
+            for (let i = 0; i < queue.length; i++) {
+                const reg = queue[i];
+                if (!reg || String(reg.estado || '') !== 'pendiente' || !esRegistroColaPacking(reg)) continue;
+                const body = reg.payload;
+                if (!body || !Array.isArray(body.packingRows) || !body.packingRows.length) {
+                    reg.estado = 'bloqueado';
+                    reg.error = 'Payload packing vacío';
+                    reg.actualizado_en = Date.now();
+                    huboCambios = true;
+                    pushEstadoSyncPacking(reg);
+                    continue;
+                }
+                reg.intentos = Number(reg.intentos || 0) + 1;
+                reg.actualizado_en = Date.now();
+                try {
+                    await fetch(API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    const ok = await confirmarPackingEnServidorTrasPost_(reg);
+                    if (ok) {
+                        reg.estado = 'subido';
+                        reg.error = '';
+                        pushEstadoSyncPacking(reg);
+                        queue.splice(i, 1);
+                        i--;
+                        huboCambios = true;
+                        const selAct = ensayoSeleccionado();
+                        const mismaMuestra = selAct.ensayo_numero
+                            && String(reg.fecha) === String(elFecha?.value || '')
+                            && String(reg.ensayo_numero) === String(selAct.ensayo_numero);
+                        if (mismaMuestra) {
+                            const rawMuestra = (reg.num_muestra && reg.ensayo_numero)
+                                ? (reg.num_muestra + '|' + reg.ensayo_numero)
+                                : '';
+                            limpiarBorradorTrasEnvioExitosoPacking(reg.fecha, rawMuestra);
+                            packingCards = [];
+                            renderizarCardsPacking();
+                            await cargarDetalle(reg.fecha, reg.ensayo_numero);
+                        }
+                        mostrarToastPacking('success', 'Cola enviada', 'Packing de muestra ' + (reg.num_muestra || '') + ' subido a la planilla.');
+                    } else {
+                        reg.error = 'POST enviado; esperando confirmación en planilla.';
+                        huboCambios = true;
+                        pushEstadoSyncPacking(reg);
+                    }
+                } catch (err) {
+                    reg.error = String(err?.message || err || 'Error POST');
+                    reg.actualizado_en = Date.now();
+                    huboCambios = true;
+                    pushEstadoSyncPacking(reg);
+                }
+            }
+        } finally {
+            if (huboCambios) guardarColaSyncPacking(queue);
+            syncPackingEnCurso = false;
+            actualizarHeaderPendientes();
+        }
+    }
+
+    async function aplicarExitoEnvioPacking_(sel) {
+        mostrarToastPacking('success', 'Enviado', 'Registro packing enviado a la planilla.');
+        setStatus('');
+        if (elStatus) elStatus.hidden = true;
+        const fecha = elFecha?.value || '';
+        const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
+            ? (sel.num_muestra + '|' + sel.ensayo_numero)
+            : (elMuestra?.value || '');
+        limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
+        packingCards = [];
+        renderizarCardsPacking();
+        if (fecha && sel.ensayo_numero) {
+            await cargarDetalle(fecha, sel.ensayo_numero);
+        }
+    }
+
     function logEnvioPackingConsola(body, cards) {
         const n = Array.isArray(body.packingRows) ? body.packingRows.length : 0;
         console.log(
@@ -1895,10 +2094,6 @@
             mostrarToastPacking('warning', 'Clamshells incompletos', cuotaReg.error);
             return;
         }
-        if (!navigator.onLine) {
-            setStatus('Sin internet para enviar al servidor.', 'warn');
-            return;
-        }
         const totalCampo = packingQuota.filasTotalCampo || totalFilasCampoPacking();
         const inicio = packingQuota.filasPackingRegistradas;
         if (totalCampo > 0 && inicio + packingCards.length > totalCampo) {
@@ -1926,6 +2121,32 @@
         const body = getMetaEnvioPacking();
         logEnvioPackingConsola(body, packingCards);
         guardarBorradorMuestraActiva();
+
+        if (!navigator.onLine) {
+            const encolado = encolarPackingPendiente(body);
+            if (encolado?.duplicado) {
+                mostrarToastPacking('info', 'Ya en cola', 'Este packing ya está pendiente de envío cuando vuelva internet.');
+                return;
+            }
+            if (encolado) {
+                const fecha = elFecha?.value || '';
+                const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
+                    ? (sel.num_muestra + '|' + sel.ensayo_numero)
+                    : (elMuestra?.value || '');
+                limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
+                packingCards = [];
+                renderizarCardsPacking();
+                setStatus('');
+                if (elStatus) elStatus.hidden = true;
+                mostrarToastPacking(
+                    'warning',
+                    'Sin internet',
+                    'Quedó en cola y se enviará a la planilla al volver la conexión.'
+                );
+            }
+            return;
+        }
+
         envioPackingEnCurso = true;
         setButtonLoadingPacking(elBtnEnviarPacking, true, 'Enviando...');
         try {
@@ -1935,20 +2156,50 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
-            mostrarToastPacking('success', 'Enviado', 'Registro packing enviado a la planilla.');
+            const regTmp = { payload: body };
+            const confirmado = await confirmarPackingEnServidorTrasPost_(regTmp);
+            if (confirmado) {
+                await aplicarExitoEnvioPacking_(sel);
+                return;
+            }
+            const encolado = encolarPackingPendiente(body);
+            if (encolado && !encolado.duplicado) {
+                const fecha = elFecha?.value || '';
+                const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
+                    ? (sel.num_muestra + '|' + sel.ensayo_numero)
+                    : (elMuestra?.value || '');
+                limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
+                packingCards = [];
+                renderizarCardsPacking();
+            }
+            mostrarToastPacking(
+                'info',
+                'En cola',
+                'POST enviado; si la planilla tarda en confirmar, se reintentará con internet.'
+            );
             setStatus('');
             if (elStatus) elStatus.hidden = true;
-            const fecha = elFecha?.value || '';
-            const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
-                ? (sel.num_muestra + '|' + sel.ensayo_numero)
-                : (elMuestra?.value || '');
-            limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
-            if (fecha && sel.ensayo_numero) {
-                await cargarDetalle(fecha, sel.ensayo_numero);
-            }
         } catch (err) {
-            setStatus(String(err.message || err), 'error');
-            mostrarToastPacking('error', 'Error', String(err.message || err));
+            const encolado = encolarPackingPendiente(body);
+            if (encolado && !encolado.duplicado) {
+                const fecha = elFecha?.value || '';
+                const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
+                    ? (sel.num_muestra + '|' + sel.ensayo_numero)
+                    : (elMuestra?.value || '');
+                limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
+                packingCards = [];
+                renderizarCardsPacking();
+                mostrarToastPacking(
+                    'warning',
+                    'Conexión inestable',
+                    'Falló el envío directo; quedó en cola para reenviar con internet.'
+                );
+                setStatus('');
+                if (elStatus) elStatus.hidden = true;
+            } else {
+                setStatus(String(err.message || err), 'error');
+                mostrarToastPacking('error', 'Error', String(err.message || err));
+            }
         } finally {
             envioPackingEnCurso = false;
             setButtonLoadingPacking(elBtnEnviarPacking, false);
@@ -2033,6 +2284,7 @@
         }
         setSelectLoading(true, 'Sincronizando planilla…');
         try {
+            await sincronizarPendientesPacking();
             await acotarFechaDesdePlanilla();
             const fecha = elFecha?.value || '';
             if (fecha) await cargarMuestrasPorFecha(fecha);
@@ -2921,7 +3173,7 @@
 
     window.addEventListener('online', () => {
         actualizarHeaderConexion();
-        void acotarFechaDesdePlanilla().then(onFechaCambiada);
+        void sincronizarPendientesPacking().then(() => acotarFechaDesdePlanilla().then(onFechaCambiada));
     });
     window.addEventListener('offline', actualizarHeaderConexion);
     window.addEventListener('resize', syncPackingFoldBtnAnchor, { passive: true });
@@ -2934,6 +3186,7 @@
     }
 
     window.sincronizarConPlanillaPacking = sincronizarConPlanillaPacking;
+    window.sincronizarPendientesPacking = sincronizarPendientesPacking;
     window.borrarTodoYCachePacking = borrarTodoYCachePacking;
     window.fabIniciarRegistroPacking = fabIniciarRegistroPacking;
     window.agregarCardPacking = agregarCardPacking;
@@ -2975,5 +3228,7 @@
         } else {
             setStatus('Sin internet. Puedes seguir si ya guardaste un borrador de muestra.', 'warn');
         }
+    } else {
+        void sincronizarPendientesPacking();
     }
 }());

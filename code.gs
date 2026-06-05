@@ -1,20 +1,20 @@
 /**
  * Google Apps Script - MTTP Arándano
  * Recibe datos del formulario y los escribe en la hoja activa.
- * Hoja 1: 46 cols — orden = formulario (Muestra, N° muestra, responsable, …) sin OBSERVACION_FORMATO; packing desde col 47.
+ * Hoja 1: 48 cols — orden = formulario (… OBSERVACION, OBSERVACION_FORMATO, HORA_REGISTRO); packing desde col 49.
  *
  * ANTI-DUPLICADOS: UID + clave de fila normalizada.
  *
- * --- PACKING (cols 47–86) ---
+ * --- PACKING (cols 49–88) ---
  */
-var PACKING_START_COL = 47;
+var PACKING_START_COL = 49;
 var PACKING_COLS = 40;
-var THERMOKING_START_COL = PACKING_START_COL + PACKING_COLS; // 87
+var THERMOKING_START_COL = PACKING_START_COL + PACKING_COLS; // 89
 var THERMOKING_COLS = 39;
-var C5_START_COL = THERMOKING_START_COL + THERMOKING_COLS; // 126
+var C5_START_COL = THERMOKING_START_COL + THERMOKING_COLS; // 128
 
-/** 46 columnas Hoja 1 (registro): un solo orden; debe coincidir con app.js construirFilaBaseRegistro. */
-var NUM_COLS_REGISTRO = 46;
+/** 48 columnas Hoja 1 (registro): un solo orden; debe coincidir con app.js construirFilaBaseRegistro. */
+var NUM_COLS_REGISTRO = 48;
 
 /** Máximo NUM_MUESTRA “consumido” en el tiempo; solo sube (borrar filas en hoja no retrocede la secuencia). */
 var NUM_MUESTRA_WATERMARK_KEY = 'mtpp_num_muestra_watermark_v1';
@@ -30,8 +30,21 @@ function getRegistroHeadersHoja1_() {
     "HUMEDAD_INICIO", "HUMEDAD_TERMINO", "HUMEDAD_LLEGADA", "HUMEDAD_DESPACHO",
     "PRESION_AMB_INICIO", "PRESION_AMB_TERMINO", "PRESION_AMB_LLEGADA", "PRESION_AMB_DESPACHO",
     "PRESION_FRUTA_INICIO", "PRESION_FRUTA_TERMINO", "PRESION_FRUTA_LLEGADA", "PRESION_FRUTA_DESPACHO",
-    "OBSERVACION"
+    "OBSERVACION", "OBSERVACION_FORMATO", "HORA_REGISTRO"
   ];
+}
+
+/** Inserta AU–AV (OBSERVACION_FORMATO, HORA_REGISTRO) si la hoja aún tiene FECHA_INSPECCION en col 47. */
+function migrarInsertarColsFormato_(sheet) {
+  if (sheet.getLastRow() === 0) return;
+  var colObs = NUM_COLS_REGISTRO - 2;
+  var h47 = String(sheet.getRange(1, colObs + 1).getValue() || "").trim().toUpperCase();
+  var h46 = String(sheet.getRange(1, colObs).getValue() || "").trim().toUpperCase();
+  if (h46 === "OBSERVACION" && h47 === "FECHA_INSPECCION") {
+    sheet.insertColumnsAfter(colObs, 2);
+    sheet.getRange(1, colObs + 1).setValue("OBSERVACION_FORMATO");
+    sheet.getRange(1, colObs + 2).setValue("HORA_REGISTRO");
+  }
 }
 
 /**
@@ -53,15 +66,20 @@ function asegurarEncabezadoHoja1Registro_(sheet) {
   if (a1 !== "FECHA") {
     return;
   }
+  migrarInsertarColsFormato_(sheet);
   var b1 = String(sheet.getRange(1, 2).getValue() || "").trim();
   var l1 = String(sheet.getRange(1, 12).getValue() || "").trim();
-  // Esquema nuevo: col B = ENSAYO_NOMBRE, col L = GUIA_REMISION (12ª columna).
-  if (b1 === "ENSAYO_NOMBRE" && l1 === "GUIA_REMISION") {
+  var colObs = NUM_COLS_REGISTRO - 2;
+  var h46 = String(sheet.getRange(1, colObs).getValue() || "").trim().toUpperCase();
+  var h47 = String(sheet.getRange(1, colObs + 1).getValue() || "").trim().toUpperCase();
+  var h48 = String(sheet.getRange(1, colObs + 2).getValue() || "").trim().toUpperCase();
+  // Esquema actual: ENSAYO_NOMBRE + GUIA_REMISION + OBSERVACION_FORMATO / HORA_REGISTRO tras OBSERVACION.
+  if (b1 === "ENSAYO_NOMBRE" && l1 === "GUIA_REMISION" && h46 === "OBSERVACION" && h47 === "OBSERVACION_FORMATO" && h48 === "HORA_REGISTRO") {
     return;
   }
   var viejoB = b1 === "RESPONSABLE" || b1 === "GUIA_REMISION";
   var viejoL = l1 === "OBSERVACION_FORMATO";
-  if (viejoB || viejoL || b1 === "") {
+  if (viejoB || viejoL || b1 === "" || h47 !== "OBSERVACION_FORMATO") {
     sheet.getRange(1, 1, 1, h.length).setValues([h]);
   }
 }
@@ -540,7 +558,7 @@ function doPost(e) {
     asegurarEncabezadoHoja1Registro_(sheet);
 
     const NUM_COLS = NUM_COLS_REGISTRO;
-    /** Fila expandida 52: pos. 0–19 + 20–25 (Hoja2) + 26–51 → 46 col Hoja1. */
+    /** Fila expandida 54: pos. 0–19 + 20–25 (Hoja2) + 26–53 → 48 col Hoja1. */
 
     function normalizarParaClave(v) {
       if (v === null || v === undefined) return "";
@@ -548,7 +566,7 @@ function doPost(e) {
       var s = String(v).trim();
       return s;
     }
-    /** Misma lógica que "antes": anti-duplicado por los 46 valores de la fila (normalizados), sin clave abreviada. */
+    /** Misma lógica que "antes": anti-duplicado por los 48 valores de la fila (normalizados), sin clave abreviada. */
     function buildKey(row) {
       return row.slice(0, NUM_COLS).map(normalizarParaClave).join("||");
     }
@@ -568,18 +586,18 @@ function doPost(e) {
       return String(cell);
     }
 
-    /** 52 celdas: 20 inicio Hoja1 + 6 (Hoja2) + 26 cierre → 46 col Hoja1 (mismo corte que toRow46 "antes"). */
+    /** 54 celdas: 20 inicio Hoja1 + 6 (Hoja2) + 28 cierre → 48 col Hoja1. */
     function toRowRegistro(row) {
-      var minLen = 52;
+      var minLen = 54;
       while (row.length < minLen) row.push("");
-      var a = row.slice(0, 20).concat(row.slice(26, 52));
+      var a = row.slice(0, 20).concat(row.slice(26, 54));
       return a.slice(0, NUM_COLS).map(celdaAString);
     }
 
     function rowHoja2(fila, rowOriginal) {
       var c = celdaAString;
       var out = [c(fila[0]), c(fila[13]), c(fila[15]), '', '', '', '', '', ''];
-      /** Hueco 20-25: Cosecha + Trasvasado desde el panel de jarras (POST 52 celdas). */
+      /** Hueco 20-25: Cosecha + Trasvasado desde el panel de jarras (POST 54 celdas). */
       if (rowOriginal && rowOriginal.length >= 26) {
         out[3] = c(rowOriginal[20]);
         out[4] = c(rowOriginal[21]);
@@ -599,7 +617,7 @@ function doPost(e) {
       return isNaN(n) || n === 0;
     }
 
-    var minExpanded = 52;
+    var minExpanded = 54;
     var nuevasFilas = [];
     var filasHoja2 = [];
     rows.forEach(function(row) {

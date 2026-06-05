@@ -1,0 +1,847 @@
+/**
+ * PDF Agrovision (Campo) — Hoja 1 igual al formulario físico PE-F-QPH-306.
+ */
+(function campoPdfModule() {
+    const LOGO_URL = './log.png';
+    const PAGE = { w: 297, h: 210, margin: 7 };
+    const GRIS_CABECERA = { r: 217, g: 217, b: 217 };
+    /** Igual que Excel «Girar texto hacia arriba»: 90° CCW, centrado en la celda. */
+    const ANGULO_EXCEL_HACIA_ARRIBA = 90;
+    /** Tamaño unificado de cabeceras (referencia: INICIO DE COSECHA). */
+    const FS_CABECERA_TABLA = 6.4;
+    const FS_CABECERA_GRUPO = FS_CABECERA_TABLA;
+    const FS_CABECERA_VERTICAL = FS_CABECERA_TABLA;
+    const FS_CABECERA_VERTICAL_MIN = 3.5;
+    const PAD_CELDA_VERTICAL_X = 3.9;
+    const PAD_CELDA_VERTICAL_Y = 1.5;
+    /** jsPDF 2.x no rota bien con center/middle; centrado geométrico vía left/bottom. */
+    const ANCLAJE_VERTICAL = {
+        angle: ANGULO_EXCEL_HACIA_ARRIBA,
+        align: 'left',
+        baseline: 'bottom'
+    };
+
+    let logoDataUrlCache = null;
+    let pdfBlobActual = null;
+    let pdfNombreActual = 'medicion-arandano.pdf';
+
+    function contentWidth() {
+        return PAGE.w - PAGE.margin * 2;
+    }
+
+    /** Margen extra para que el contenido no se corte al imprimir (ambas hojas). */
+    function layoutHojaImpresion() {
+        const insetX = 8;
+        const insetBottom = 5;
+        const Wfull = contentWidth();
+        return {
+            margin: PAGE.margin + insetX,
+            width: Wfull - insetX * 2,
+            bottomY: PAGE.h - PAGE.margin - insetBottom
+        };
+    }
+
+    function txt(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).trim();
+    }
+
+    function valCelda(v) {
+        const s = txt(v);
+        return s === '' ? '' : s;
+    }
+
+    async function cargarLogoDataUrl() {
+        if (logoDataUrlCache) return logoDataUrlCache;
+        try {
+            const r = await fetch(LOGO_URL, { cache: 'force-cache' });
+            if (!r.ok) return null;
+            const blob = await r.blob();
+            return await new Promise((resolve) => {
+                const fr = new FileReader();
+                fr.onload = () => {
+                    logoDataUrlCache = fr.result;
+                    resolve(logoDataUrlCache);
+                };
+                fr.onerror = () => resolve(null);
+                fr.readAsDataURL(blob);
+            });
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function obtenerJsPDF() {
+        const lib = window.jspdf;
+        if (!lib || !lib.jsPDF) return null;
+        return lib.jsPDF;
+    }
+
+    function nombreArchivoPdf(datos) {
+        const f = txt(datos?.fecha || datos?.meta?.fecha || '').replace(/\//g, '-').replace(/\./g, '-');
+        const trazRaw = txt(datos?.meta?.trazabilidadArchivo || datos?.meta?.trazabilidad || '').split(' / ')[0].trim();
+        const traz = trazRaw
+            .replace(/\s+/g, '')
+            .replace(/[\\/:*?"<>|]+/g, '-');
+        const parteFecha = f || 'sin-fecha';
+        const parteTraz = traz || 'sin-traz';
+        return `${parteFecha}_${parteTraz}.pdf`;
+    }
+
+    function pesosColumnas(weights, totalW) {
+        const sum = weights.reduce((a, b) => a + b, 0);
+        return weights.map((w) => (w / sum) * totalW);
+    }
+
+    function rellenoGris(doc, x, y, w, h) {
+        doc.setFillColor(GRIS_CABECERA.r, GRIS_CABECERA.g, GRIS_CABECERA.b);
+        doc.rect(x, y, w, h, 'F');
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.2);
+        doc.rect(x, y, w, h);
+    }
+
+    function borde(doc, x, y, w, h) {
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.2);
+        doc.rect(x, y, w, h);
+    }
+
+    function dibujarCelda(doc, x, y, w, h, texto, opts) {
+        const o = opts || {};
+        if (o.fillGray) rellenoGris(doc, x, y, w, h);
+        else borde(doc, x, y, w, h);
+        if (!txt(texto)) return;
+        const fs = o.fontSize || 7;
+        const align = o.align || 'center';
+        doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
+        doc.setFontSize(fs);
+        const pad = o.pad != null ? o.pad : 1;
+        const maxW = Math.max(2, w - pad * 2);
+        const lines = doc.splitTextToSize(String(texto), maxW);
+        const lineH = fs * 0.4;
+        const blockH = lines.length * lineH;
+        let ty = y + (h - blockH) / 2 + lineH * 0.85;
+        lines.forEach((ln) => {
+            if (align === 'left') doc.text(ln, x + pad, ty, { align: 'left' });
+            else doc.text(ln, x + w / 2, ty, { align: 'center' });
+            ty += lineH;
+        });
+    }
+
+    function lineasVertical(texto) {
+        return String(texto).split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+    }
+
+    /** Anclaje left/bottom + angle 90: centro geométrico del texto rotado en la celda. */
+    function anclajeVerticalCentrado(x, y, w, h, dim, padX) {
+        const px = padX != null ? padX : PAD_CELDA_VERTICAL_X;
+        return {
+            tx: x + px + Math.max(0, (w - px * 2 - dim.alto) / 2),
+            ty: y + (h + dim.ancho) / 2
+        };
+    }
+
+    /** Tamaño inicial para texto vertical (soporta varias líneas con \\n). */
+    function fontVerticalInicial(texto, w, h) {
+        const lines = lineasVertical(texto);
+        const n = Math.max(1, lines.length);
+        const maxLen = Math.max(1, ...lines.map((l) => l.length));
+        const porAncho = (w - PAD_CELDA_VERTICAL_X * 2) * 2.55;
+        const porAlto = (h - PAD_CELDA_VERTICAL_Y * 2) / (maxLen * 0.32 * n + (n - 1) * 0.55);
+        return Math.min(7.2, Math.max(4.5, Math.min(porAncho, porAlto)));
+    }
+
+    function medirTextoHorizontal(doc, t, fs) {
+        doc.setFontSize(fs);
+        try {
+            if (typeof doc.getTextDimensions === 'function') {
+                const d = doc.getTextDimensions(t, { fontSize: fs });
+                return { ancho: d.w, alto: d.h };
+            }
+        } catch (_) { /* ignore */ }
+        const scale = doc.internal.scaleFactor || 1;
+        return {
+            ancho: (doc.getStringUnitWidth(t) * fs) / scale,
+            alto: fs / scale
+        };
+    }
+
+    /** Texto vertical (90° CCW), una línea por celda — centrado geométrico (como PESO 1). */
+    function dibujarCeldaVertical(doc, x, y, w, h, texto, opts) {
+        const o = opts || {};
+        if (o.fillGray) rellenoGris(doc, x, y, w, h);
+        else borde(doc, x, y, w, h);
+        if (!txt(texto)) return;
+        const t = String(texto).split('\n')[0].trim() || String(texto).trim();
+        if (!t) return;
+
+        doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
+        const fsMin = o.fsMin != null ? o.fsMin : FS_CABECERA_VERTICAL_MIN;
+        const padX = o.padX != null ? o.padX : PAD_CELDA_VERTICAL_X;
+        const padY = o.padY != null ? o.padY : PAD_CELDA_VERTICAL_Y;
+        let fs = o.fontSize || fontVerticalInicial(t, w - padX * 2, h - padY * 2);
+        if (!o.fsFijo) fs = Math.min(fs, FS_CABECERA_VERTICAL);
+        doc.setFontSize(fs);
+
+        let dim = medirTextoHorizontal(doc, t, fs);
+        if (!o.fsFijo) {
+            while (
+                (dim.alto > w - padX * 2 || dim.ancho > h - padY * 2)
+                && fs > fsMin
+            ) {
+                fs -= 0.08;
+                doc.setFontSize(fs);
+                dim = medirTextoHorizontal(doc, t, fs);
+            }
+        }
+
+        const { tx, ty } = anclajeVerticalCentrado(x, y, w, h, dim, padX);
+        doc.text(t, tx, ty, ANCLAJE_VERTICAL);
+    }
+
+    /** Cabeceras con varias líneas (temperatura, traslado). */
+    function dibujarCeldaVerticalConLineas(doc, x, y, w, h, lineas, opts) {
+        const o = opts || {};
+        if (o.fillGray) rellenoGris(doc, x, y, w, h);
+        else borde(doc, x, y, w, h);
+        const lines = (lineas || []).map((l) => String(l).trim()).filter((l) => l.length > 0);
+        if (!lines.length) return;
+
+        doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
+        const padX = o.padX != null ? o.padX : PAD_CELDA_VERTICAL_X;
+        const padY = o.padY != null ? o.padY : PAD_CELDA_VERTICAL_Y;
+        const textoRef = lines.join('\n');
+        let fs = o.fontSize || fontVerticalInicial(textoRef, w - padX * 2, h - padY * 2);
+        if (!o.fsFijo) fs = Math.min(fs, FS_CABECERA_VERTICAL);
+        doc.setFontSize(fs);
+        let gap = fs * 0.14;
+
+        function medirBloque(dims) {
+            const anchoBloque = dims.reduce((a, d) => a + d.alto, 0) + gap * Math.max(0, lines.length - 1);
+            const altoBloque = Math.max(...dims.map((d) => d.ancho), 0);
+            return { anchoBloque, altoBloque };
+        }
+
+        let dims = lines.map((ln) => medirTextoHorizontal(doc, ln, fs));
+        let bloque = medirBloque(dims);
+        if (!o.fsFijo) {
+            while (
+                (bloque.anchoBloque > w - padX * 2 || bloque.altoBloque > h - padY * 2)
+                && fs > FS_CABECERA_VERTICAL_MIN
+            ) {
+                fs -= 0.08;
+                doc.setFontSize(fs);
+                gap = fs * 0.14;
+                dims = lines.map((ln) => medirTextoHorizontal(doc, ln, fs));
+                bloque = medirBloque(dims);
+            }
+        }
+
+        let tx = x + padX + Math.max(0, (w - padX * 2 - bloque.anchoBloque) / 2);
+        const ty = y + (h + bloque.altoBloque) / 2;
+        lines.forEach((ln, i) => {
+            doc.text(ln, tx, ty, ANCLAJE_VERTICAL);
+            tx += dims[i].alto + (i < lines.length - 1 ? gap : 0);
+        });
+    }
+
+    function tituloEncabezadoEnDosLineas(titulo) {
+        const t = txt(titulo) || 'FORMATO';
+        if (/^FORMATO\s+/i.test(t)) {
+            return { linea1: 'FORMATO', linea2: t.replace(/^FORMATO\s+/i, '').trim() };
+        }
+        const sp = t.indexOf(' ');
+        if (sp > 0) return { linea1: t.slice(0, sp), linea2: t.slice(sp + 1).trim() };
+        return { linea1: t, linea2: '' };
+    }
+
+    function encabezadoPagina(doc, datos, titulo, logoUrl, layout) {
+        const m = layout?.margin ?? PAGE.margin;
+        const W = layout?.width ?? contentWidth();
+        const y0 = m;
+        const headH = 17;
+        const colIzqW = 52;
+        const colDerW = 46;
+        const colMidW = W - colIzqW - colDerW;
+        const xIzq = m;
+        const xMid = m + colIzqW;
+        const xDer = m + colIzqW + colMidW;
+
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.2);
+        doc.rect(m, y0, W, headH);
+        doc.line(xMid, y0, xMid, y0 + headH);
+        doc.line(xDer, y0, xDer, y0 + headH);
+
+        const empresa = txt(datos.empresa) || 'AGROVISION';
+        const logoW = 13;
+        const logoH = 13;
+        const logoX = xIzq + (colIzqW - logoW) / 2;
+        const logoY = y0 + 0.6;
+        if (logoUrl) {
+            try {
+                doc.addImage(logoUrl, 'PNG', logoX, logoY, logoW, logoH);
+            } catch (_) { /* ignore */ }
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text(empresa, xIzq + colIzqW / 2, y0 + headH - 2.6, { align: 'center' });
+
+        const { linea1, linea2 } = tituloEncabezadoEnDosLineas(titulo || datos.tituloHoja1);
+        const midCx = xMid + colMidW / 2;
+        const maxTitW = colMidW - 4;
+        doc.setFont('helvetica', 'bold');
+        let fs1 = 9.5;
+        let fs2 = 7.2;
+        if (linea2) {
+            doc.setFontSize(fs2);
+            const scale = doc.internal.scaleFactor || 1;
+            while (
+                (doc.getStringUnitWidth(linea2) * fs2) / scale > maxTitW
+                && fs2 > 5.2
+            ) {
+                fs2 -= 0.1;
+                doc.setFontSize(fs2);
+            }
+        }
+        const gapTit = 3;
+        const blockH = fs1 * 0.35 + (linea2 ? gapTit + fs2 * 0.35 : 0);
+        let ty = y0 + (headH - blockH) / 2 + fs1 * 0.3;
+        doc.setFontSize(fs1);
+        doc.text(linea1, midCx, ty, { align: 'center' });
+        if (linea2) {
+            ty += gapTit + fs1 * 0.05;
+            doc.setFontSize(fs2);
+            doc.text(linea2, midCx, ty, { align: 'center' });
+        }
+
+        const padDer = 2;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.8);
+        doc.text(`Código: ${datos.codigo || 'PE-F-QPH-306'}`, xDer + padDer, y0 + 6.2, { align: 'left' });
+        doc.text(`Versión: ${datos.version || '1'}`, xDer + padDer, y0 + 12.2, { align: 'left' });
+
+        return y0 + headH + 0.75;
+    }
+
+    function anchoTexto(doc, texto, fs) {
+        const scale = doc.internal.scaleFactor || 1;
+        return (doc.getStringUnitWidth(String(texto)) * fs) / scale;
+    }
+
+    /** Etiqueta y valor en la misma línea, justo después del «:». */
+    function dibujarCampoMeta(doc, x, y, w, label, val) {
+        const padIzq = 6;
+        const padDer = 2;
+        const innerW = w - padIzq - padDer;
+        const v = valCelda(val);
+        const fsVal = 7;
+        const gapColon = 0.8;
+        const minLinea = 4;
+        const factorLinea = 0.5;
+
+        doc.setFont('helvetica', 'bold');
+        let fsLabel = 6;
+        doc.setFontSize(fsLabel);
+        let labelW = anchoTexto(doc, label, fsLabel);
+        let valW = v ? anchoTexto(doc, v, fsVal) : 0;
+        let lineaW = Math.max(minLinea, (innerW - labelW - gapColon) * factorLinea);
+        let totalW = labelW + gapColon + Math.max(valW, lineaW);
+
+        while (totalW > innerW && fsLabel > 4) {
+            fsLabel -= 0.12;
+            doc.setFontSize(fsLabel);
+            labelW = anchoTexto(doc, label, fsLabel);
+            lineaW = Math.max(minLinea, (innerW - labelW - gapColon) * factorLinea);
+            totalW = labelW + gapColon + Math.max(valW, lineaW);
+        }
+
+        const textY = y + 4;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(fsLabel);
+        doc.text(label, x + padIzq, textY);
+
+        const valX = x + padIzq + labelW + gapColon;
+        const lineX1 = valX + lineaW;
+        const underY = textY + 0.55;
+
+        doc.setLineWidth(0.15);
+        doc.setDrawColor(0);
+        doc.line(valX, underY, lineX1, underY);
+
+        if (v) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(fsVal);
+            doc.text(v, valX + 0.3, textY);
+        }
+    }
+
+    /** Meta: 3 filas × 3 columnas, sin cuadro exterior (igual al formulario PE-F-QPH-306). */
+    function bloqueMeta(doc, datos, yStart, layout) {
+        const m = layout?.margin ?? PAGE.margin;
+        const W = layout?.width ?? contentWidth();
+        const meta = datos.meta || {};
+        const desplazDer = 5;
+        const metaW = W - desplazDer;
+        const colW = metaW / 3;
+        const rowH = 6.75;
+        const padSup = 1.75;
+        const padInf = 2;
+        const filas = [
+            [
+                { label: 'FECHA:', val: meta.fecha || datos.fecha },
+                { label: 'TRAZABILIDAD:', val: meta.trazabilidad },
+                { label: 'RESPONSABLE:', val: meta.responsable }
+            ],
+            [
+                { label: 'GUIA DE REMISIÓN ACOPIO CAMPO:', val: meta.guiaRemision },
+                { label: 'RÓTULO DE MUESTRA:', val: meta.rotulo || datos.ensayo },
+                { label: 'HORA DE INICIO GENERAL:', val: meta.horaInicio }
+            ],
+            [
+                { label: 'VARIEDAD:', val: meta.variedad },
+                { label: 'PLACA DEL VEHÍCULO:', val: meta.placa },
+                { label: 'DIAS DE PRECOSECHA/Nº DE COSECHA:', val: meta.precosecha }
+            ]
+        ];
+
+        let y = yStart + padSup;
+        filas.forEach((fila) => {
+            fila.forEach((cell, c) => {
+                dibujarCampoMeta(doc, m + desplazDer + c * colW, y, colW, cell.label, cell.val);
+            });
+            y += rowH;
+        });
+        return y + padInf;
+    }
+
+    function disclaimer(doc, layout) {
+        const m = layout?.margin ?? PAGE.margin;
+        const W = layout?.width ?? contentWidth();
+        const yDisc = layout?.bottomY != null ? layout.bottomY - 1.5 : PAGE.h - 5;
+        doc.setFontSize(5);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(60);
+        doc.text(
+            'Prohibida la reproducción parcial o total de este documento, sin la autorización de la Gerencia General',
+            m + W / 2,
+            yDisc,
+            { align: 'center', maxWidth: W - 10 }
+        );
+        doc.setTextColor(0);
+        doc.setFont('helvetica', 'normal');
+    }
+
+    function generarHoja1(doc, datos, logoUrl) {
+        const layout = layoutHojaImpresion();
+        const m = layout.margin;
+        const W = layout.width;
+        let y = encabezadoPagina(doc, datos, datos.tituloHoja1, logoUrl, layout);
+        y = bloqueMeta(doc, datos, y, layout);
+
+        const weights = [
+            1.85, 1.95,
+            2.5, 2.5, 2.5, 2.5, 2.5, 2.6, 2.6,
+            2.8, 3.0, 2.8, 2.6, 2.6,
+            3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3,
+            2.6, 3.2, 2.4, 2.4, 2.6
+        ];
+        const cw = pesosColumnas(weights, W);
+        const nCols = 27;
+        const idxTemp = 14;
+        const nTemp = 8;
+
+        const hGroup = 7;
+        const hDetalleUnico = 42;
+        const hTempEv = 20;
+        const hTempSub = 22;
+        const hHeadTotal = hGroup + hDetalleUnico;
+        /** Formato físico: 8 filas con datos + 4 vacías; altura fija (no estirar al pie). */
+        const nFilasDatos = 8;
+        const nFilasVacias = 4;
+        const nFilasCuerpo = nFilasDatos + nFilasVacias;
+        const hRow = 5.9;
+        const hFoot = 11;
+        const yTab = y;
+        const yDet = yTab + hGroup;
+
+        const subLabels = [
+            'Nº CLAMSHELL', 'Nº JARRA',
+            'PESO 1', 'PESO 2', 'PESO 3', 'PESO 4', 'PESO 5',
+            'LLEGADA ACOPIO - CAMPO', 'DESPACHO ACOPIO - CAMPO',
+            'INICIO DE COSECHA', 'INICIO DE PERDIDA DE PESO', 'TÉRMINO DE COSECHA',
+            'LLEGADA ACOPIO - CAMPO', 'DESPACHO ACOPIO - CAMPO',
+            '', '', '', '', '', '', '', '',
+            'Nº DE JARRA - LLENADO', 'TRASLADO U OTRA OBSERVACION', 'INICIO', 'TERMINO', 'TIEMPO EMPLEADO'
+        ];
+
+        const tempEventsLineas = [
+            ['INICIO DE', 'COSECHA'],
+            ['TÉRMINO DE', 'COSECHA'],
+            ['LLEGADA', 'ACOPIO', 'CAMPO'],
+            ['DESPACHO', 'ACOPIO -', 'CAMPO']
+        ];
+        const trasladoLineas = ['TRASLADO U OTRA', 'OBSERVACION'];
+        const tempSubLabels = ['T° AMBIENTE', 'T° PULPA'];
+
+        const labelsGroup = [
+            { i: 2, n: 7, t: 'PESO BRUTO (G)' },
+            { i: 9, n: 5, t: 'TIEMPOS DE LA MUESTRA (HORA)' },
+            { i: 14, n: 8, t: 'TEMPERATURA MUESTRA(°C)' },
+            { i: 22, n: 5, t: 'TIEMPO DE LLENADO DE JARRAS (HORA)' }
+        ];
+
+        const vHdr = { bold: true, fillGray: true, fontSize: FS_CABECERA_TABLA, fsFijo: true };
+        const PADX_TIEMPOS_MUESTRA = 4.2;
+        const idxPadTiemposMuestra = new Set([9, 10, 11, 12, 13]);
+        const wClamJarra = cw[0] + cw[1];
+        /** N° CLAMSHELL + N° JARRA: hueco blanco arriba (sin borde arriba/izquierda, como formato físico). */
+        doc.setFillColor(255, 255, 255);
+        doc.rect(m, yTab, wClamJarra, hGroup, 'F');
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.2);
+        doc.line(m + wClamJarra, yTab, m + wClamJarra, yDet);
+        rellenoGris(doc, m, yDet, wClamJarra, hDetalleUnico);
+        doc.line(m + cw[0], yDet, m + cw[0], yDet + hDetalleUnico);
+        dibujarCeldaVertical(doc, m, yDet, cw[0], hDetalleUnico, subLabels[0], { ...vHdr, fillGray: false });
+        dibujarCeldaVertical(doc, m + cw[0], yDet, cw[1], hDetalleUnico, subLabels[1], { ...vHdr, fillGray: false });
+
+        /** Grupos (PESO BRUTO, etc.) solo desde columna 3. */
+        let x = m + wClamJarra;
+        labelsGroup.forEach((g) => {
+            const w = cw.slice(g.i, g.i + g.n).reduce((a, b) => a + b, 0);
+            dibujarCelda(doc, x, yTab, w, hGroup, g.t, { fontSize: FS_CABECERA_GRUPO, bold: true, fillGray: true });
+            x += w;
+        });
+
+        const yTempEv = yDet;
+        const yTempSub = yDet + hTempEv;
+
+        for (let i = 2; i < idxTemp; i++) {
+            const xi = m + cw.slice(0, i).reduce((a, b) => a + b, 0);
+            const hdrCol = idxPadTiemposMuestra.has(i) ? { ...vHdr, padX: PADX_TIEMPOS_MUESTRA } : vHdr;
+            dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, subLabels[i], hdrCol);
+        }
+
+        let xt = m + cw.slice(0, idxTemp).reduce((a, b) => a + b, 0);
+        tempEventsLineas.forEach((lineas, ei) => {
+            const w = cw[idxTemp + ei * 2] + cw[idxTemp + ei * 2 + 1];
+            dibujarCeldaVerticalConLineas(doc, xt, yTempEv, w, hTempEv, lineas, vHdr);
+            xt += w;
+        });
+
+        xt = m + cw.slice(0, idxTemp).reduce((a, b) => a + b, 0);
+        for (let i = 0; i < nTemp; i++) {
+            dibujarCeldaVertical(
+                doc,
+                xt,
+                yTempSub,
+                cw[idxTemp + i],
+                hTempSub,
+                tempSubLabels[i % 2],
+                vHdr
+            );
+            xt += cw[idxTemp + i];
+        }
+
+        for (let i = 22; i < nCols; i++) {
+            const xi = m + cw.slice(0, i).reduce((a, b) => a + b, 0);
+            if (i === 23) {
+                dibujarCeldaVerticalConLineas(doc, xi, yDet, cw[i], hDetalleUnico, trasladoLineas, vHdr);
+            } else {
+                dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, subLabels[i], vHdr);
+            }
+        }
+
+        y = yTab + hHeadTotal;
+
+        for (let ri = 0; ri < nFilasCuerpo; ri++) {
+            const fila = (datos.filas || [])[ri] || {};
+            x = m;
+            const vals = [
+                fila.nClam,
+                fila.jarra,
+                fila.p1, fila.p2, fila.p3, fila.p4, fila.p5, fila.llegada, fila.despacho,
+                fila.tInicioCosecha, fila.tPerdida, fila.tTermino, fila.tLlegada, fila.tDespacho,
+                fila.tempInicioAmb, fila.tempInicioPul, fila.tempTerminoAmb, fila.tempTerminoPul,
+                fila.tempLlegadaAmb, fila.tempLlegadaPul, fila.tempDespachoAmb, fila.tempDespachoPul,
+                fila.jarraLlenado, fila.trasladoObs, fila.jarraInicio, fila.jarraTermino, fila.jarraTiempo
+            ];
+            cw.forEach((w, i) => {
+                dibujarCelda(doc, x, y, w, hRow, valCelda(vals[i]), { fontSize: 6.2, pad: 0.4 });
+                x += w;
+            });
+            y += hRow;
+        }
+
+        const yFootTop = y;
+        const idxObsFoot = 7;
+        const xPesado = m;
+        const pesadoW = cw[0] + cw[1];
+        const xObs = m + cw.slice(0, idxObsFoot).reduce((a, b) => a + b, 0);
+        const obsW = W - cw.slice(0, idxObsFoot).reduce((a, b) => a + b, 0);
+
+        rellenoGris(doc, xPesado, yFootTop, pesadoW, hFoot);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.6);
+        const lhPesado = 2.45;
+        const etiquetaPesado = ['HORA', 'DE', 'PESADO'];
+        const bloquePesadoH = lhPesado * etiquetaPesado.length;
+        let yPesadoLbl = yFootTop + (hFoot - bloquePesadoH) / 2 + lhPesado * 0.85;
+        etiquetaPesado.forEach((ln) => {
+            doc.text(ln, xPesado + pesadoW / 2, yPesadoLbl, { align: 'center' });
+            yPesadoLbl += lhPesado;
+        });
+
+        let xPieMid = xPesado + pesadoW;
+        for (let ci = 2; ci < idxObsFoot; ci++) {
+            borde(doc, xPieMid, yFootTop, cw[ci], hFoot);
+            xPieMid += cw[ci];
+        }
+
+        borde(doc, xObs, yFootTop, obsW, hFoot);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.2);
+        doc.text('OBSERVACIONES:', xObs + 2, yFootTop + 4);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
+        const obsFormato = txt(datos.observacionesFormato);
+        if (obsFormato) {
+            const lineas = doc.splitTextToSize(obsFormato, obsW - 4);
+            let yObs = yFootTop + 7;
+            const lh = 2.8;
+            const yMax = yFootTop + hFoot - 1;
+            lineas.forEach((linea) => {
+                if (yObs > yMax) return;
+                doc.text(linea, xObs + 2, yObs);
+                yObs += lh;
+            });
+        }
+        if (txt(datos.horaPesado)) {
+            doc.setFontSize(6);
+            doc.text(datos.horaPesado, xPesado + pesadoW / 2, yFootTop + hFoot - 1.2, { align: 'center' });
+        }
+
+        disclaimer(doc, layout);
+    }
+
+    function generarHoja2(doc, datos, logoUrl) {
+        const layout = layoutHojaImpresion();
+        const m = layout.margin;
+        const W = layout.width;
+        let y = encabezadoPagina(doc, datos, datos.tituloHoja2, logoUrl, layout);
+        y = bloqueMeta(doc, datos, y, layout);
+
+        const p2 = datos.pagina2 || {};
+        const eventos = ['INICIO DE COSECHA', 'TÉRMINO DE COSECHA', 'LLEGADA ACOPIO', 'DESPACHO- ACOPIO'];
+        const grupos = [
+            { tit: 'HUMEDAD RELATIVA(%)', vals: p2.humedad || [] },
+            { tit: 'TEMPERATURA AMBIENTE (°C)', vals: p2.tempAmbiente || [] },
+            { tit: 'PRESIÓN DE VAPOR AMBIENTE (Kpa)', vals: p2.presionAmb || [] },
+            { tit: 'PRESIÓN DE VAPOR FRUTA (Kpa)', vals: p2.presionFruta || [] }
+        ];
+
+        const obsW = W * 0.26;
+        const dataW = W - obsW;
+        const colW = dataW / 16;
+        const hG = 7;
+        const hSub = 36;
+        const hData = 7.5;
+        const hFilaVacia = 5.8;
+        const ySig = layout.bottomY - 18;
+        const filasVacias = Math.max(11, Math.floor((ySig - y - hG - hSub - hData - 8) / hFilaVacia));
+
+        function listaObservacionesP2(pagina2) {
+            if (Array.isArray(pagina2?.observacionesLista)) {
+                return pagina2.observacionesLista.map((o) => valCelda(o));
+            }
+            const raw = txt(pagina2?.observaciones);
+            if (!raw) return [];
+            return raw.split(/\s*·\s*/).map((s) => s.trim()).filter(Boolean);
+        }
+
+        const obsLista = listaObservacionesP2(p2);
+        const yTab = y;
+        const obsX = m + dataW;
+
+        const ySub = yTab + hG;
+        const hObsHdr = hG + hSub;
+
+        grupos.forEach((g, gi) => {
+            const xg = m + gi * colW * 4;
+            dibujarCelda(doc, xg, yTab, colW * 4, hG, g.tit, { fontSize: FS_CABECERA_GRUPO, bold: true, fillGray: true });
+        });
+        rellenoGris(doc, obsX, yTab, obsW, hObsHdr);
+
+        let x = m;
+        for (let i = 0; i < 16; i++) {
+            dibujarCeldaVertical(doc, x, ySub, colW, hSub, eventos[i % 4], {
+                fillGray: true,
+                bold: true,
+                fontSize: FS_CABECERA_TABLA,
+                fsFijo: true
+            });
+            x += colW;
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(FS_CABECERA_TABLA);
+        doc.text('OBSERVACIONES', obsX + obsW / 2, ySub + hSub / 2 + 2, { align: 'center' });
+
+        const yData = ySub + hSub;
+        x = m;
+        const filaVals = [];
+        grupos.forEach((g) => (g.vals || []).forEach((v) => filaVals.push(v)));
+        for (let i = 0; i < 16; i++) {
+            dibujarCelda(doc, x, yData, colW, hData, valCelda(filaVals[i]), { fontSize: 6.2, pad: 0.4 });
+            x += colW;
+        }
+        dibujarCelda(doc, obsX, yData, obsW, hData, valCelda(obsLista[0]), {
+            fontSize: 6.2,
+            pad: 0.4,
+            align: 'center'
+        });
+
+        y = yData + hData;
+        for (let r = 0; r < filasVacias; r++) {
+            x = m;
+            for (let i = 0; i < 16; i++) {
+                dibujarCelda(doc, x, y, colW, hFilaVacia, '', { fontSize: 6.2, pad: 0.4 });
+                x += colW;
+            }
+            dibujarCelda(doc, obsX, y, obsW, hFilaVacia, valCelda(obsLista[r + 1]), {
+                fontSize: 6.2,
+                pad: 0.4,
+                align: 'center'
+            });
+            y += hFilaVacia;
+        }
+
+        disclaimer(doc, layout);
+
+        const ySigLine = layout.bottomY - 12;
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.line(m + 10, ySigLine, m + 75, ySigLine);
+        doc.text('NOMBRE Y FIRMA', m + 42, ySigLine + 4, { align: 'center' });
+        doc.text('Inspector de Calidad-Campo', m + 42, ySigLine + 8.5, { align: 'center' });
+        doc.line(m + W - 75, ySigLine, m + W - 10, ySigLine);
+        doc.text('NOMBRE Y FIRMA', m + W - 42, ySigLine + 4, { align: 'center' });
+        doc.text('Supervisor de Calidad-Packing', m + W - 42, ySigLine + 8.5, { align: 'center' });
+    }
+
+    async function generarPdfCampoBlob(datos) {
+        const JsPDF = obtenerJsPDF();
+        if (!JsPDF) throw new Error('jsPDF no está cargado');
+        const logoUrl = await cargarLogoDataUrl();
+        const doc = new JsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        generarHoja1(doc, datos, logoUrl);
+        doc.addPage('a4', 'landscape');
+        generarHoja2(doc, datos, logoUrl);
+        return doc.output('blob');
+    }
+
+    function cerrarModalPdf() {
+        const ov = document.getElementById('pdf-modal-overlay');
+        if (ov) ov.style.display = 'none';
+        const iframe = document.getElementById('pdf-preview-iframe');
+        if (iframe && iframe.src && iframe.src.startsWith('blob:')) {
+            try { URL.revokeObjectURL(iframe.src); } catch (_) { /* ignore */ }
+        }
+        if (iframe) iframe.removeAttribute('src');
+    }
+
+    function abrirModalPdf(blob, nombre) {
+        pdfBlobActual = blob;
+        pdfNombreActual = nombre || 'medicion-arandano.pdf';
+        const ov = document.getElementById('pdf-modal-overlay');
+        const iframe = document.getElementById('pdf-preview-iframe');
+        if (!ov || !iframe) return;
+        const url = URL.createObjectURL(blob);
+        iframe.src = url;
+        ov.style.display = 'flex';
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            window.lucide.createIcons();
+        }
+    }
+
+    function descargarPdfActual() {
+        if (!pdfBlobActual) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(pdfBlobActual);
+        a.download = pdfNombreActual;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    async function compartirWhatsAppPdf() {
+        if (!pdfBlobActual) return;
+        const file = new File([pdfBlobActual], pdfNombreActual, { type: 'application/pdf' });
+        const titulo = pdfNombreActual.replace('.pdf', '');
+        if (navigator.share) {
+            try {
+                const payload = { title: titulo, files: [file] };
+                if (!navigator.canShare || navigator.canShare(payload)) {
+                    await navigator.share(payload);
+                    return;
+                }
+            } catch (err) {
+                if (err && err.name === 'AbortError') return;
+            }
+        }
+        descargarPdfActual();
+        const msg = encodeURIComponent(`${titulo}\n(Adjunta el PDF descargado)`);
+        window.open(`https://wa.me/?text=${msg}`, '_blank', 'noopener,noreferrer');
+    }
+
+    async function generarYMostrarPdfCampo() {
+        if (typeof window.obtenerDatosPdfCampo !== 'function') {
+            if (window.Swal) {
+                window.Swal.fire({ icon: 'error', title: 'PDF no disponible', text: 'Recarga la página e intenta de nuevo.' });
+            }
+            return;
+        }
+        const btn = document.getElementById('fab-pdf-btn');
+        if (btn) btn.disabled = true;
+        try {
+            if (!obtenerJsPDF()) {
+                throw new Error('Biblioteca PDF no cargada. Conéctate una vez a internet para precargar.');
+            }
+            const datos = window.obtenerDatosPdfCampo();
+            const blob = await generarPdfCampoBlob(datos);
+            abrirModalPdf(blob, nombreArchivoPdf(datos));
+        } catch (e) {
+            const msg = e && e.message ? e.message : 'No se pudo generar el PDF.';
+            if (window.Swal) {
+                window.Swal.fire({ icon: 'error', title: 'Error al generar PDF', text: msg });
+            } else {
+                window.alert(msg);
+            }
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    function initCampoPdf() {
+        document.getElementById('fab-pdf-btn')?.addEventListener('click', () => {
+            void generarYMostrarPdfCampo();
+        });
+        document.getElementById('pdf-btn-cerrar')?.addEventListener('click', cerrarModalPdf);
+        document.getElementById('pdf-btn-descargar')?.addEventListener('click', descargarPdfActual);
+        document.getElementById('pdf-btn-wsp')?.addEventListener('click', () => {
+            void compartirWhatsAppPdf();
+        });
+        document.getElementById('pdf-modal-overlay')?.addEventListener('click', (ev) => {
+            if (ev.target && ev.target.id === 'pdf-modal-overlay') cerrarModalPdf();
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initCampoPdf);
+    } else {
+        initCampoPdf();
+    }
+
+    window.generarYMostrarPdfCampo = generarYMostrarPdfCampo;
+})();

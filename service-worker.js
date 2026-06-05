@@ -1,4 +1,4 @@
-const SW_VERSION = 'v88';
+const SW_VERSION = 'v148';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 120;
@@ -9,8 +9,13 @@ const APP_SHELL = [
     './index.html',
     './styles.css',
     './app.js',
+    './campo-pdf.js',
+    './librerias/jspdf.umd.min.js',
     './network.js',
     './script.js',
+    './catalogo-json.js',
+    './mapeo-parcelas-data.js',
+    './data/catalogo-app.json',
     './time-picker.js',
     './librerias/lucide.min.js',
     './librerias/sweetalert2.all.min.js',
