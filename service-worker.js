@@ -1,4 +1,4 @@
-const SW_VERSION = 'v155';
+const SW_VERSION = 'v156';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 120;

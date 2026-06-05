@@ -876,6 +876,28 @@
         }
     }
 
+    function bufferCanvasPaginaPdf(item) {
+        if (!item.bufferCanvas) {
+            item.bufferCanvas = document.createElement('canvas');
+            item.bufferCtx = item.bufferCanvas.getContext('2d', { alpha: false });
+        }
+        return { canvas: item.bufferCanvas, ctx: item.bufferCtx };
+    }
+
+    function pintarCanvasBlanco(ctx, ancho, alto) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, ancho, alto);
+    }
+
+    function aplicarBufferEnCanvasVisible(item, buffer, cssW, cssH, pxW, pxH) {
+        item.canvas.style.width = `${cssW}px`;
+        item.canvas.style.height = `${cssH}px`;
+        item.canvas.width = pxW;
+        item.canvas.height = pxH;
+        pintarCanvasBlanco(item.ctx, pxW, pxH);
+        item.ctx.drawImage(buffer, 0, 0);
+    }
+
     async function renderizarPdfPreviewZoom(zoom) {
         if (!pdfPreviewSession) return;
         const session = pdfPreviewSession;
@@ -883,6 +905,7 @@
         const token = ++session.renderGen;
         const dpr = PDF_PREVIEW_DPR();
         const scaler = document.getElementById('pdf-preview-scaler');
+        const listo = [];
 
         for (const item of session.pages) {
             const page = await session.pdf.getPage(item.pageNum);
@@ -890,15 +913,24 @@
             const displayScale = session.ancho / baseVp.width;
             const cssVp = page.getViewport({ scale: displayScale * zoomFinal });
             const renderVp = page.getViewport({ scale: displayScale * zoomFinal * dpr });
-            item.canvas.width = Math.floor(renderVp.width);
-            item.canvas.height = Math.floor(renderVp.height);
-            item.canvas.style.width = `${Math.floor(cssVp.width)}px`;
-            item.canvas.style.height = `${Math.floor(cssVp.height)}px`;
+            const pxW = Math.floor(renderVp.width);
+            const pxH = Math.floor(renderVp.height);
+            const cssW = Math.floor(cssVp.width);
+            const cssH = Math.floor(cssVp.height);
+            const { canvas: buffer, ctx: bufferCtx } = bufferCanvasPaginaPdf(item);
+            buffer.width = pxW;
+            buffer.height = pxH;
+            pintarCanvasBlanco(bufferCtx, pxW, pxH);
             if (token !== session.renderGen) return;
-            await page.render({ canvasContext: item.ctx, viewport: renderVp }).promise;
+            await page.render({ canvasContext: bufferCtx, viewport: renderVp }).promise;
+            if (token !== session.renderGen) return;
+            listo.push({ item, buffer, cssW, cssH, pxW, pxH });
         }
 
         if (token !== session.renderGen) return;
+        for (const frame of listo) {
+            aplicarBufferEnCanvasVisible(frame.item, frame.buffer, frame.cssW, frame.cssH, frame.pxW, frame.pxH);
+        }
         session.lastRenderedZoom = zoomFinal;
         pdfZoomState.scale = zoomFinal;
         if (scaler) scaler.style.transform = '';
