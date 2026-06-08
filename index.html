@@ -355,9 +355,12 @@
         <div class="modal-content">
             <h2 id="essential-modal-title" style="margin-bottom: 16px; color: var(--primary);">Resumen esencial</h2>
             <div class="metric-modal-body" id="essential-modal-body"></div>
-            <div class="metric-modal-foot">
+            <div class="metric-modal-foot essential-modal-foot">
                 <button class="btn-secondary" type="button" onclick="cerrarModalResumen()">Cancelar</button>
-                <button class="btn-save" id="btn-save-resumen-global" type="button" onclick="guardarModalResumenGlobal()">Guardar</button>
+                <button class="btn-save pdf-action-btn pdf-action-btn--wsp essential-wsp-btn" id="btn-save-resumen-global" type="button" onclick="enviarModalResumenGlobalWhatsApp()">
+                    <i data-lucide="message-circle" aria-hidden="true"></i>
+                    <span class="essential-wsp-btn-label">Enviar WhatsApp</span>
+                </button>
             </div>
         </div>
     </div>

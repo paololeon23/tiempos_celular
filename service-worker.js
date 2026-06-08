@@ -1,4 +1,4 @@
-const SW_VERSION = 'v156';
+const SW_VERSION = 'v226';
 const STATIC_CACHE = `tiempos-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `tiempos-runtime-${SW_VERSION}`;
 const MAX_RUNTIME_ENTRIES = 120;
@@ -10,6 +10,7 @@ const APP_SHELL = [
     './styles.css',
     './app.js',
     './campo-pdf.js',
+    './packing-pdf.js',
     './librerias/jspdf.umd.min.js',
     './librerias/pdf.min.js',
     './librerias/pdf.worker.min.js',

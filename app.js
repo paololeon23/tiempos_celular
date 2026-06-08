@@ -1,4 +1,4 @@
-﻿const META_SAVE_IDS = [
+const META_SAVE_IDS = [
     'visual-meta-muestra',
     'visual-responsable',
     'visual-guia-precosecha',
@@ -591,10 +591,18 @@
             if (id === 'visual-fecha-ring-widget') return hoyIsoLocal();
             if (id === 'visual-meta-muestra') return clave;
             if (id === 'visual-guia-acopio') {
-                return String(ensayoMeta?.[clave]?.guiaRemision || '').trim();
+                return String(
+                    ensayoMeta?.[clave]?.guiaRemision
+                    || meta['visual-guia-acopio']
+                    || ''
+                ).trim();
             }
             if (id === 'visual-placa-vehiculo') {
-                return String(ensayoMeta?.[clave]?.placaVehiculo || '').trim();
+                return String(
+                    ensayoMeta?.[clave]?.placaVehiculo
+                    || meta['visual-placa-vehiculo']
+                    || ''
+                ).trim();
             }
             return String(meta[id] ?? '').trim();
         }
@@ -611,6 +619,7 @@
                 'visual-traz-etapa',
                 'visual-traz-campo',
                 'visual-traz-turno',
+                'visual-traz-acopio',
                 'visual-meta-variedad',
                 'visual-fecha-ring-widget',
                 'visual-guia-acopio',
@@ -618,6 +627,12 @@
             ];
             const ensayo = String(ensayoObjetivo || obtenerEnsayoActivo() || 'Ensayo 1');
             metaIds.forEach((id) => {
+                if (id === 'visual-num-muestra') {
+                    if (!numMuestraValidoParaEnvioEnsayo(ensayo)) {
+                        faltantes.push(etiquetaCampoRequerido(id));
+                    }
+                    return;
+                }
                 if (campoVacio(valorCampoMetaEnsayo_(ensayo, id))) faltantes.push(etiquetaCampoRequerido(id));
             });
             const items = data
@@ -672,9 +687,38 @@
             return faltantes;
         }
 
+        function numMuestraValidoParaEnvioEnsayo(ensayo) {
+            const clave = String(ensayo || '').trim();
+            if (!clave || ensayoEstaRegistradoHoy(clave)) return true;
+            const n = String(leerNumMuestraDesdePantalla(clave) || '').trim();
+            if (n) return true;
+            return !!String(calcularNumMuestraBaseDesdeContexto(clave) || '').trim();
+        }
+
+        function ensayosCandidatosConDatosCampo() {
+            const set = new Set();
+            data.forEach((it) => {
+                const e = String(it?.ensayo || 'Ensayo 1').trim();
+                if (e) set.add(e);
+            });
+            listarEnsayosEnCursoOrdenados().forEach((e) => set.add(e));
+            Object.keys(metaPorEnsayo || {}).forEach((e) => {
+                if (
+                    metaEnsayoCompletaParaOrden(e)
+                    || ensayoMetaTieneDatosTrabajo(e)
+                    || data.some((it) => String(it?.ensayo || '') === e)
+                ) {
+                    set.add(e);
+                }
+            });
+            return ordenarEnsayosPorNumeroMuestra(
+                [...set].filter((e) => e && !ensayoEstaRegistradoHoy(e))
+            );
+        }
+
         function obtenerEnsayosCompletosParaEnvio() {
-            const ensayos = [...new Set(data.map((it) => String(it?.ensayo || 'Ensayo 1')).filter(Boolean))];
-            return ensayos.filter((ensayo) => recolectarFaltantesEnvio(ensayo).length === 0);
+            return ensayosCandidatosConDatosCampo()
+                .filter((ensayo) => recolectarFaltantesEnvio(ensayo).length === 0);
         }
 
         function etiquetaCampoRequerido(id) {
@@ -860,6 +904,7 @@
 
         let metaPorEnsayo = {};
         let metaActivoEnsayo = 'Ensayo 1';
+        let ensayoActivo = 'Ensayo 1';
         /** Muestras que el operador usa en esta sesión (1 y 4 → N° base+0 y base+1, no 01 y 04). */
         let ensayosActivadosSesion = new Set();
         /** Último max y próximo N° devueltos por Apps Script (fuente de verdad con internet). */
@@ -1114,20 +1159,42 @@
             aplicarBloqueoMuestrasCacheLocal();
         }
 
+        function sincronizarMaxNumMuestraDesdeContextoLocal() {
+            const maxCtx = leerMaxNumericoNumMuestraTodoContexto();
+            if (maxCtx > numMuestraMaxServidorCache) {
+                logNumMuestra('sincronizarMaxNumMuestraDesdeContextoLocal', {
+                    max_antes: numMuestraMaxServidorCache,
+                    max_despues: maxCtx
+                });
+                numMuestraMaxServidorCache = maxCtx;
+            }
+            if (maxCtx > 0) {
+                proximoNumMuestraServidorCache = formatearNumMuestraAutoDesdeN(maxCtx + 1);
+            }
+        }
+
+        function invalidarNumerosMuestraFijadosObsoletos() {
+            Object.keys(numerosMuestraFijadosSesion).forEach((ensayo) => {
+                if (ensayoEstaRegistradoHoy(ensayo)) {
+                    delete numerosMuestraFijadosSesion[ensayo];
+                    return;
+                }
+                const calc = calcularNumMuestraBaseDesdeContexto(ensayo);
+                const fij = numerosMuestraFijadosSesion[ensayo];
+                if (!fij || parseNumMuestraSoloDigitos(fij) !== parseNumMuestraSoloDigitos(calc)) {
+                    delete numerosMuestraFijadosSesion[ensayo];
+                }
+            });
+        }
+
         function fusionarMaxNumMuestraCampo(n) {
             if (navigator.onLine && API_URL) return;
             const k = parseNumMuestraSoloDigitos(n);
             if (k > numMuestraMaxServidorCache) {
-                logNumMuestra('fusionarMaxNumMuestraCampo (offline)', {
-                    valor: n,
-                    max_antes: numMuestraMaxServidorCache,
-                    max_despues: k
-                });
                 numMuestraMaxServidorCache = k;
-                if (k > 0) {
-                    proximoNumMuestraServidorCache = formatearNumMuestraAutoDesdeN(k + 1);
-                }
             }
+            sincronizarMaxNumMuestraDesdeContextoLocal();
+            invalidarNumerosMuestraFijadosObsoletos();
         }
 
         function leerMaxDesdeNumMuestraUsadosLocal() {
@@ -1186,6 +1253,11 @@
             delete actual['visual-num-muestra'];
             delete actual._num_muestra_fijo;
             metaPorEnsayo[ensayo] = actual;
+            const g = String(actual['visual-guia-acopio'] || '').trim();
+            const pl = String(actual['visual-placa-vehiculo'] || '').trim().toUpperCase();
+            if (g || pl) {
+                ensayoMeta[ensayo] = { guiaRemision: g, placaVehiculo: pl };
+            }
         }
 
         function marcarEnsayoEnUsoSesion(ensayo) {
@@ -1239,6 +1311,7 @@
             sincronizarChipsDesdeAlmacenamiento();
             actualizarVistaCompacta();
             actualizarProgresoMeta();
+            programarActualizarErroresMetaFormulario();
         }
 
         function cargarMetaDesdeAlmacenamiento() {
@@ -1344,8 +1417,97 @@
             'visual-hora',
             'visual-meta-fundo',
             'visual-meta-variedad',
-            'visual-trazabilidad'
+            'visual-trazabilidad',
+            'visual-traz-acopio'
         ];
+
+        /** Campos visibles del acordeón meta: borde rojo suave en tiempo real si están vacíos. */
+        const META_CAMPOS_UI_VALIDACION = [
+            'visual-responsable',
+            'visual-guia-precosecha',
+            'visual-hora',
+            'visual-meta-fundo',
+            'visual-traz-acopio',
+            'visual-traz-etapa',
+            'visual-traz-campo',
+            'visual-traz-turno',
+            'visual-meta-variedad'
+        ];
+
+        function campoMetaUiVacio(id) {
+            return campoVacio(valorCampoRequerido(id));
+        }
+
+        function recolectarMetaUiFaltantes_() {
+            sincronizarTrazabilidadCompuesta();
+            return META_CAMPOS_UI_VALIDACION.filter((id) => campoMetaUiVacio(id));
+        }
+
+        function pintarMetaUiFaltantes_(idsFaltantes) {
+            const faltan = new Set(idsFaltantes || []);
+            META_CAMPOS_UI_VALIDACION.forEach((id) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('meta-inp--falta', faltan.has(id));
+            });
+        }
+
+        let metaValidacionPausada = false;
+        let metaValidacionRaf = 0;
+
+        function actualizarErroresMetaFormularioCore() {
+            const faltantes = recolectarMetaUiFaltantes_();
+            pintarMetaUiFaltantes_(faltantes);
+            return faltantes;
+        }
+
+        function programarActualizarErroresMetaFormulario() {
+            if (metaValidacionPausada) return;
+            if (metaValidacionRaf) return;
+            metaValidacionRaf = requestAnimationFrame(() => {
+                metaValidacionRaf = 0;
+                if (metaValidacionPausada) return;
+                actualizarErroresMetaFormularioCore();
+            });
+        }
+
+        function pausarValidacionMetaCampo(on) {
+            metaValidacionPausada = !!on;
+            if (!on) programarActualizarErroresMetaFormulario();
+        }
+
+        function actualizarErroresMetaFormulario() {
+            if (metaValidacionPausada) return [];
+            return actualizarErroresMetaFormularioCore();
+        }
+        window.actualizarErroresMetaFormulario = actualizarErroresMetaFormulario;
+        window.programarActualizarErroresMetaFormulario = programarActualizarErroresMetaFormulario;
+        window.pausarValidacionMetaCampo = pausarValidacionMetaCampo;
+
+        function validarMetaCriticaAntesCambioMuestra() {
+            const faltantes = actualizarErroresMetaFormularioCore();
+            if (!faltantes.length) return true;
+            establecerAcordeonMetaAbierto(true);
+            const first = document.getElementById(faltantes[0]);
+            if (first && typeof first.focus === 'function') first.focus();
+            return false;
+        }
+
+        function conectarValidacionMetaTiempoReal() {
+            const refrescar = () => programarActualizarErroresMetaFormulario();
+            META_CAMPOS_UI_VALIDACION.forEach((id) => {
+                const el = document.getElementById(id);
+                if (!el || el.dataset.metaUiValBound === '1') return;
+                el.dataset.metaUiValBound = '1';
+                el.addEventListener('input', refrescar);
+                el.addEventListener('change', refrescar);
+            });
+            const muestraEl = document.getElementById('visual-meta-muestra');
+            if (muestraEl && muestraEl.dataset.metaUiValBound !== '1') {
+                muestraEl.dataset.metaUiValBound = '1';
+                muestraEl.addEventListener('change', refrescar);
+            }
+        }
 
         function valorMetaCampoOrden(meta, id) {
             if (!meta || typeof meta !== 'object') return '';
@@ -1402,7 +1564,7 @@
             return n;
         }
 
-        function actualizarProgresoMeta() {
+        function actualizarProgresoMeta(opts) {
             const done = progresoMetaCompletado();
             const max = META_CAMPOS_ORDEN_LLENADO.length;
             const pct = (done / max) * 100;
@@ -1411,6 +1573,7 @@
             if (fill) fill.style.width = pct + '%';
             if (txt) txt.textContent = done + ' / ' + max;
             aplicarBloqueoMuestrasCacheLocal();
+            if (!opts?.sinValidacion) programarActualizarErroresMetaFormulario();
         }
 
         function sincronizarChipsDesdeAlmacenamiento() {
@@ -1448,6 +1611,7 @@
                         actualizarVistaCompacta();
                         programarGuardadoMeta();
                         actualizarProgresoMeta();
+                        programarActualizarErroresMetaFormulario();
                     });
                 });
             });
@@ -1465,6 +1629,7 @@
                         actualizarVistaCompacta();
                         programarGuardadoMeta();
                         actualizarProgresoMeta();
+                        programarActualizarErroresMetaFormulario();
                     });
                 });
             });
@@ -1487,6 +1652,7 @@
                 programarGuardadoMeta();
                 actualizarProgresoMeta();
                 actualizarVistaCompacta();
+                programarActualizarErroresMetaFormulario();
             });
             metaForm.addEventListener('change', async () => {
                 actualizarBloqueoTrazabilidadPorFundo();
@@ -1497,13 +1663,22 @@
                 if (rotulo && muestra) {
                     const anterior = metaActivoEnsayo || 'Ensayo 1';
                     if (muestraEl && muestra !== anterior) {
+                        if (!validarMetaCriticaAntesCambioMuestra()) {
+                            if (muestraEl) muestraEl.value = anterior;
+                            if (rotulo) rotulo.value = anterior;
+                            actualizarVistaCompacta();
+                            actualizarProgresoMeta();
+                            return;
+                        }
                         const permitido = await bloquearCambioMuestraFueraDeOrden(muestra, anterior);
                         if (!permitido) {
                             actualizarVistaCompacta();
                             actualizarProgresoMeta();
                             return;
                         }
+                        persistirLogisticaAcopioDesdeInputs();
                         snapshotMetaEnsayoActual(anterior);
+                        programarActualizarErroresMetaFormulario();
                         if (!metaPorEnsayo[muestra]) {
                             metaPorEnsayo[muestra] = {
                                 'visual-meta-muestra': muestra,
@@ -1519,6 +1694,7 @@
                 programarGuardadoMeta();
                 actualizarProgresoMeta();
                 actualizarVistaCompacta();
+                programarActualizarErroresMetaFormulario();
             });
         }
 
@@ -1580,6 +1756,7 @@
         asegurarOpcionesSelectAcopio();
 
         conectarGruposChips();
+        conectarValidacionMetaTiempoReal();
         const cargoMeta = cargarMetaDesdeAlmacenamiento();
         if (!cargoMeta) {
             metaActivoEnsayo = ensayoDesdeFormulario();
@@ -1594,6 +1771,7 @@
         sincronizarChipsDesdeAlmacenamiento();
         actualizarVistaCompacta();
         actualizarProgresoMeta();
+        programarActualizarErroresMetaFormulario();
         function metricaVacia() {
             return {
                 tiempo: { inicioCosecha: '', inicioPerdida: '', terminoCosecha: '', llegadaAcopio: '', despachoAcopio: '' },
@@ -1615,7 +1793,6 @@
         const observationModalState = { itemId: null };
         const controlGlobalState = { tipo: null };
         const horasLlenadoModalState = { ensayo: '', idFila: null };
-        let ensayoActivo = 'Ensayo 1';
         const llenadoJarrasState = {
             porEnsayo: {}
         };
@@ -1663,7 +1840,7 @@
 
         function obtenerEnsayoActivo() {
             const rotulo = document.getElementById('visual-rotulo')?.value?.trim();
-            return rotulo || ensayoActivo || 'Ensayo 1';
+            return rotulo || metaActivoEnsayo || ensayoActivo || 'Ensayo 1';
         }
 
         function numeroClamshellPorEnsayo(itemOrId) {
@@ -3770,25 +3947,119 @@
             });
         }
 
-        function reaplicarCatalogoYMetaGuardada() {
+        function sincronizarUiMetaCampoLigera_(opts) {
+            actualizarBloqueoTrazabilidadPorFundo();
+            sincronizarTrazabilidadCompuesta();
+            sincronizarChipsDesdeAlmacenamiento();
+            actualizarVistaCompacta();
+            actualizarProgresoMeta(opts);
+        }
+
+        function reaplicarParcelaDesdeMetaGuardada_(ensayo) {
+            const meta = metaPorEnsayo[ensayo] || {};
+            if (typeof window.pausarRefVariedadesCampo === 'function') {
+                window.pausarRefVariedadesCampo(true);
+            }
+            try {
+                if (typeof window.aplicarParcelaCampoDesdeMeta === 'function') {
+                    window.aplicarParcelaCampoDesdeMeta(meta);
+                }
+            } finally {
+                if (typeof window.pausarRefVariedadesCampo === 'function') {
+                    window.pausarRefVariedadesCampo(false);
+                }
+            }
+        }
+
+        function reaplicarCatalogoYMetaGuardada(opts) {
             const ensayo = ensayoActivo || metaActivoEnsayo || obtenerEnsayoActivo() || 'Ensayo 1';
-            snapshotMetaEnsayoActual(ensayo);
+            if (!opts?.omitirSnapshot) snapshotMetaEnsayoActual(ensayo);
             const tieneMeta = metaPorEnsayo[ensayo] && ensayoMetaTieneDatosTrabajo(ensayo);
             if (tieneMeta) {
-                cargarMetaDeEnsayo(ensayo);
-            } else {
+                if (opts?.catalogoRecienIniciado) {
+                    reaplicarParcelaDesdeMetaGuardada_(ensayo);
+                    sincronizarUiMetaCampoLigera_();
+                } else {
+                    cargarMetaDeEnsayo(ensayo);
+                }
+            } else if (!opts?.catalogoRecienIniciado) {
                 actualizarBloqueoTrazabilidadPorFundo();
                 if (typeof window.refrescarSelectsCatalogoCampo === 'function') {
                     window.refrescarSelectsCatalogoCampo();
                 }
-                sincronizarTrazabilidadCompuesta();
-                sincronizarChipsDesdeAlmacenamiento();
-                actualizarVistaCompacta();
-                actualizarProgresoMeta();
+                sincronizarUiMetaCampoLigera_();
+            } else {
+                sincronizarUiMetaCampoLigera_();
             }
             asegurarOpcionesSelectAcopio(metaPorEnsayo[ensayo]?.['visual-traz-acopio']);
-            snapshotMetaEnsayoActual(ensayo);
             programarGuardadoMeta();
+        }
+
+        /** Un paso por tick (setTimeout) para no bloquear el hilo principal. */
+        function ejecutarTrabajoDiferidoCampo(pasos, opts) {
+            const lista = (pasos || []).filter(Boolean);
+            if (!lista.length) {
+                opts?.alFinalizar?.();
+                return;
+            }
+            let i = 0;
+            const correr = () => {
+                if (i >= lista.length) {
+                    opts?.alFinalizar?.();
+                    return;
+                }
+                try {
+                    lista[i++]();
+                } catch (err) {
+                    console.error('[campo-arranque]', err);
+                }
+                if (i < lista.length) {
+                    setTimeout(correr, 0);
+                } else {
+                    opts?.alFinalizar?.();
+                }
+            };
+            setTimeout(correr, 0);
+        }
+
+        function arranqueCatalogoYMetaCampo_() {
+            const ensayo = ensayoActivo || metaActivoEnsayo || obtenerEnsayoActivo() || 'Ensayo 1';
+            pausarValidacionMetaCampo(true);
+            if (typeof window.pausarRefVariedadesCampo === 'function') {
+                window.pausarRefVariedadesCampo(true);
+            }
+            const pasos = [
+                () => {
+                    if (typeof window.initCatalogoSelectsCampo === 'function') {
+                        window.initCatalogoSelectsCampo({ pausarRef: true, sinAplicarFiltros: true });
+                    }
+                },
+                () => snapshotMetaEnsayoActual(ensayo)
+            ];
+            const meta = metaPorEnsayo[ensayo];
+            if (meta && ensayoMetaTieneDatosTrabajo(ensayo)) {
+                if (typeof window.pasosAplicarParcelaCampoDesdeMeta === 'function') {
+                    pasos.push(...window.pasosAplicarParcelaCampoDesdeMeta(meta));
+                } else {
+                    pasos.push(() => reaplicarParcelaDesdeMetaGuardada_(ensayo));
+                }
+            }
+            pasos.push(
+                () => sincronizarUiMetaCampoLigera_({ sinValidacion: true }),
+                () => asegurarOpcionesSelectAcopio(metaPorEnsayo[ensayo]?.['visual-traz-acopio']),
+                () => {
+                    if (typeof window.actualizarBloqueOtrasVariedadesReferencia === 'function') {
+                        window.actualizarBloqueOtrasVariedadesReferencia();
+                    }
+                },
+                () => {
+                    if (typeof window.pausarRefVariedadesCampo === 'function') {
+                        window.pausarRefVariedadesCampo(false);
+                    }
+                    pausarValidacionMetaCampo(false);
+                }
+            );
+            ejecutarTrabajoDiferidoCampo(pasos);
         }
 
         function hayTextoNoVacioEnObjeto(obj) {
@@ -4077,7 +4348,13 @@
             const rotulo = document.getElementById('visual-rotulo');
             if (rotulo) rotulo.value = muestraPreservada;
 
-            await refrescarMaxNumMuestraDesdeServidor();
+            if (!navigator.onLine || !API_URL) {
+                sincronizarMaxNumMuestraDesdeContextoLocal();
+                invalidarNumerosMuestraFijadosObsoletos();
+                refrescarEstadoOperativoLocal();
+            } else {
+                await refrescarMaxNumMuestraDesdeServidor();
+            }
             cargarMetaDeEnsayo(muestraPreservada);
 
             sincronizarTrazabilidadCompuesta();
@@ -4590,6 +4867,44 @@
             return { numeros, huecos };
         }
 
+        function detectarHuecosEnMuestrasListasParaEnvio(ensayosCompletos) {
+            const numeros = ordenarEnsayosPorNumeroMuestra(ensayosCompletos || [])
+                .map((e) => Number(numeroDesdeEnsayoTexto(e)) || 0)
+                .filter((n) => n >= 1 && n <= 5);
+            const huecos = [];
+            if (numeros.length < 2) return { numeros, huecos };
+            for (let i = numeros[0]; i <= numeros[numeros.length - 1]; i++) {
+                if (!numeros.includes(i)) huecos.push(i);
+            }
+            return { numeros, huecos };
+        }
+
+        async function validarSecuenciaMuestrasListasParaEnvio(ensayosCompletos) {
+            const { numeros, huecos } = detectarHuecosEnMuestrasListasParaEnvio(ensayosCompletos);
+            if (!huecos.length) return true;
+            const txtHuecos = huecos.map((n) => `Muestra ${n}`).join(', ');
+            const txtHay = numeros.map((n) => `Muestra ${n}`).join(', ');
+            const html = `
+                <div style="text-align:left;line-height:1.45;font-size:14px;">
+                    <p style="margin:0 0 10px;">Hay <b>${txtHay}</b> listas para enviar, pero falta <b>${txtHuecos}</b> en esa secuencia.</p>
+                    <p style="margin:0;color:#64748b;">Completa o envía las muestras intermedias antes de enviar las siguientes.</p>
+                </div>
+            `;
+            if (window.Swal && typeof window.Swal.fire === 'function') {
+                await swalFireSafe({
+                    icon: 'warning',
+                    title: 'Hueco entre muestras listas',
+                    html,
+                    confirmButtonText: 'Entendido',
+                    confirmButtonColor: '#1f4f82',
+                    allowOutsideClick: false
+                });
+            } else {
+                alert(`Falta ${txtHuecos} entre las muestras listas (${txtHay}).`);
+            }
+            return false;
+        }
+
         let ultimoHuecosMuestraAlertadosKey = '';
 
         async function validarSecuenciaMuestraSinHuecos(opciones) {
@@ -4625,18 +4940,29 @@
             return soloAvisar;
         }
 
-        /** N° = último en planilla + muestras anteriores aún no guardadas hoy (sin doble contar). */
-        function calcularNumMuestraDesdeServidorParaEnsayo(ensayo) {
-            if (ensayoEstaRegistradoHoy(ensayo)) return '';
-            const fijado = numerosMuestraFijadosSesion[String(ensayo || '').trim()];
-            if (fijado) return fijado;
-            if (navigator.onLine && API_URL && !numMuestraSincronizadoServidor) return '';
+        /** N° = último en planilla/cola + muestras anteriores aún no guardadas hoy (sin doble contar). */
+        function calcularNumMuestraBaseDesdeContexto(ensayo) {
             const destino = Number(numeroDesdeEnsayoTexto(ensayo)) || 1;
             const previas = contarMuestrasAnterioresEnSecuencia(destino);
-            const ultimo = Number(numMuestraMaxServidorCache) || 0;
+            const ultimo = leerMaxNumericoNumMuestraTodoContexto();
+            return formatearNumMuestraAutoDesdeN(ultimo + previas + 1);
+        }
+
+        function calcularNumMuestraDesdeServidorParaEnsayo(ensayo) {
+            if (ensayoEstaRegistradoHoy(ensayo)) return '';
+            if (navigator.onLine && API_URL && !numMuestraSincronizadoServidor) return '';
+            const e = String(ensayo || '').trim();
+            if (!numMuestraSincronizadoServidor) prepararProximoNumMuestraOffline();
+            const calculado = calcularNumMuestraBaseDesdeContexto(ensayo);
+            const fijado = numerosMuestraFijadosSesion[e];
+            if (fijado) {
+                const f = parseNumMuestraSoloDigitos(fijado);
+                const c = parseNumMuestraSoloDigitos(calculado);
+                if (f && c && f === c) return fijado;
+                delete numerosMuestraFijadosSesion[e];
+            }
             if (numMuestraSincronizadoServidor || (!navigator.onLine || !API_URL)) {
-                if (!numMuestraSincronizadoServidor) prepararProximoNumMuestraOffline();
-                return formatearNumMuestraAutoDesdeN(ultimo + previas + 1);
+                return calculado;
             }
             return '';
         }
@@ -4658,6 +4984,8 @@
 
         /** Sin red: bloqueo + numeración desde último max persistido. */
         function refrescarEstadoOperativoLocal() {
+            sincronizarMaxNumMuestraDesdeContextoLocal();
+            invalidarNumerosMuestraFijadosObsoletos();
             purgarMetaNumMuestraEnsayosRegistradosHoy();
             prepararProximoNumMuestraOffline();
             aplicarBloqueoMuestrasCacheLocal();
@@ -4825,8 +5153,19 @@
             try {
                 const queue = cargarColaSync();
                 queue.forEach((reg) => {
-                    if (String(reg?.estado || '') !== 'pendiente') return;
+                    const st = String(reg?.estado || '');
+                    if (st !== 'pendiente' && st !== 'bloqueado') return;
                     const k = parseNumMuestraSoloDigitos(reg?.num_muestra);
+                    if (k > maxN) maxN = k;
+                });
+            } catch (_) { /* ignore */ }
+            try {
+                const mapUsados = cargarNumMuestraUsadosLocal();
+                Object.keys(mapUsados).forEach((clave) => {
+                    const det = mapUsados[clave];
+                    const st = String(det?.estado || '').toLowerCase();
+                    if (st === 'cancelado') return;
+                    const k = parseNumMuestraSoloDigitos(clave);
                     if (k > maxN) maxN = k;
                 });
             } catch (_) { /* ignore */ }
@@ -6009,7 +6348,146 @@
                 `;
             }).join('');
             document.getElementById('essential-modal-overlay').style.display = 'flex';
+            if (typeof window.precalentarPdfAvancePacking === 'function') {
+                window.precalentarPdfAvancePacking();
+            }
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
         }
+
+        /** Solo lee placa/guía del modal (sin re-render de tarjetas). */
+        function capturarPlacaGuiaResumenModal_() {
+            const ensayos = [...new Set(data.map((item) => String(item.ensayo || '').trim()).filter(Boolean))];
+            ensayos.forEach((ensayo) => {
+                const placaInput = document.querySelector('[data-ensayo-placa="' + ensayo + '"]');
+                const guiaInput = document.querySelector('[data-ensayo-guia="' + ensayo + '"]');
+                const placa = (placaInput?.value || '').trim().toUpperCase();
+                const guia = (guiaInput?.value || '').trim();
+                ensayoMeta[ensayo] = { placaVehiculo: placa, guiaRemision: guia };
+                data.forEach((item) => {
+                    if ((item.ensayo || 'Ensayo 1') === ensayo) {
+                        item.placaVehiculo = placa;
+                        item.guiaRemision = guia;
+                    }
+                });
+            });
+        }
+
+        function persistirInputsResumenModalGlobal_() {
+            snapshotMetaEnsayoActual();
+            capturarPlacaGuiaResumenModal_();
+            renderizarTarjetas();
+            sincronizarLogisticaAcopioDesdeEnsayo();
+            programarGuardadoDraftCompleto();
+        }
+
+        function metaPdfAvanceDesdeEnsayo_(ensayo) {
+            const clave = String(ensayo || 'Ensayo 1');
+            const placaInput = document.querySelector('[data-ensayo-placa="' + clave + '"]');
+            const guiaInput = document.querySelector('[data-ensayo-guia="' + clave + '"]');
+            const placa = String(
+                placaInput?.value
+                || ensayoMeta[clave]?.placaVehiculo
+                || valorCampoMetaEnsayo_(clave, 'visual-placa-vehiculo')
+                || ''
+            ).trim().toUpperCase();
+            const guia = String(
+                guiaInput?.value
+                || ensayoMeta[clave]?.guiaRemision
+                || valorCampoMetaEnsayo_(clave, 'visual-guia-acopio')
+                || ''
+            ).trim();
+            const metaSnap = {
+                'visual-traz-etapa': valorCampoMetaEnsayo_(clave, 'visual-traz-etapa'),
+                'visual-traz-campo': valorCampoMetaEnsayo_(clave, 'visual-traz-campo'),
+                'visual-traz-turno': valorCampoMetaEnsayo_(clave, 'visual-traz-turno'),
+                'visual-traz-acopio': valorCampoMetaEnsayo_(clave, 'visual-traz-acopio')
+            };
+            return {
+                ensayo: clave,
+                muestraLabel: mostrarMuestra(clave),
+                numMuestra: valorCampoMetaEnsayo_(clave, 'visual-num-muestra'),
+                trazabilidad: trazabilidadTextoMostrar(metaSnap),
+                responsable: valorCampoMetaEnsayo_(clave, 'visual-responsable'),
+                fundo: valorCampoMetaEnsayo_(clave, 'visual-meta-fundo'),
+                variedad: valorCampoMetaEnsayo_(clave, 'visual-meta-variedad'),
+                placa,
+                guia
+            };
+        }
+
+        function obtenerDatosPdfAvancePacking() {
+            capturarPlacaGuiaResumenModal_();
+            const ensayos = [...new Set(data.map((item) => String(item.ensayo || '').trim()).filter(Boolean))];
+            const muestras = ensayos.map((ensayo) => {
+                const clamshells = data
+                    .filter((item) => (item.ensayo || 'Ensayo 1') === ensayo)
+                    .slice()
+                    .sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0))
+                    .map((item) => {
+                        const temp = item.metric?.temperatura || {};
+                        return {
+                            clamshell: numeroClamshellPorEnsayo(item),
+                            jarra: item.jarra,
+                            pesoDespacho: item.despacho ?? '',
+                            horaDespacho: item.metric?.tiempo?.despachoAcopio || '',
+                            tempAmb: temp.despachoAmbiente ?? '',
+                            tempPulpa: temp.despachoPulpa ?? '',
+                            observacion: item.observacion || ''
+                        };
+                    });
+                return {
+                    meta: metaPdfAvanceDesdeEnsayo_(ensayo),
+                    clamshells
+                };
+            });
+            const ahora = new Date();
+            return {
+                fecha: hoyIsoLocal(),
+                generadoEn: ahora.toLocaleString('es-CL', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }),
+                muestras
+            };
+        }
+
+        window.obtenerDatosPdfAvancePacking = obtenerDatosPdfAvancePacking;
+
+        async function enviarModalResumenGlobalWhatsApp() {
+            if (envioRegistroEnCurso) return;
+            envioRegistroEnCurso = true;
+            const btn = document.getElementById('btn-save-resumen-global');
+            const label = btn?.querySelector('.essential-wsp-btn-label');
+            if (btn) btn.disabled = true;
+            if (label) label.textContent = 'Enviando…';
+            try {
+                if (typeof window.generarYEnviarPdfAvancePacking !== 'function') {
+                    mostrarToast('error', 'PDF no disponible', 'Recarga la página e intenta de nuevo.');
+                    return;
+                }
+                const datos = obtenerDatosPdfAvancePacking();
+                cerrarModalResumen();
+                await window.generarYEnviarPdfAvancePacking(datos);
+                sincronizarLogisticaAcopioDesdeEnsayo();
+                programarGuardadoDraftCompleto();
+                mostrarToast('success', 'Listo', 'Vista previa abierta. Comparte por WhatsApp o descarga.');
+            } catch (e) {
+                if (e && e.name === 'AbortError') return;
+                const msg = e && e.message ? e.message : 'No se pudo enviar el PDF.';
+                mostrarToast('error', 'Error', msg);
+            } finally {
+                if (btn) btn.disabled = false;
+                if (label) label.textContent = 'Enviar WhatsApp';
+                envioRegistroEnCurso = false;
+            }
+        }
+
+        window.enviarModalResumenGlobalWhatsApp = enviarModalResumenGlobalWhatsApp;
 
         function cerrarModalResumen() {
             document.getElementById('essential-modal-overlay').style.display = 'none';
@@ -6035,11 +6513,24 @@
             programarGuardadoMeta();
         }
 
+        async function prepararDeteccionEnvioCampo() {
+            const activo = String(metaActivoEnsayo || ensayoDesdeFormulario() || 'Ensayo 1').trim() || 'Ensayo 1';
+            persistirLogisticaAcopioDesdeInputs();
+            snapshotMetaEnsayoActual(activo);
+            reconstruirEnsayosEnUsoSesionDesdeEstado();
+            if (navigator.onLine && API_URL) {
+                await refrescarEstadoServidorOperativo(false);
+            } else {
+                refrescarEstadoOperativoLocal();
+            }
+            await precongelarNumerosMuestraParaEnvio(ensayosCandidatosConDatosCampo());
+        }
+
         async function seleccionarEnsayoCompletoParaEnviar_(preferido) {
             const completos = ordenarEnsayosPorNumeroMuestra(obtenerEnsayosCompletosParaEnvio());
             if (!completos.length) return null;
-            const secuenciaOk = await validarSecuenciaMuestraSinHuecos();
-            if (!secuenciaOk) return null;
+            const { huecos } = detectarHuecosEnMuestrasListasParaEnvio(completos);
+            const secuenciaContinua = huecos.length === 0;
             if (completos.length === 1) return { modo: 'una', ensayo: completos[0] };
             const opts = {};
             completos.forEach((ensayo) => {
@@ -6047,23 +6538,26 @@
                 opts[ensayo] = `${mostrarMuestra(ensayo)} · N° ${nm}`;
             });
             const pref = completos.includes(preferido) ? preferido : completos[0];
+            const htmlSecuencia = secuenciaContinua
+                ? '<p style="margin:0 0 10px;font-size:13px;color:#64748b;">Los N° siguen el orden de muestra (1, 2, 3…). Si envías solo una, las otras conservan su código en esta sesión.</p>'
+                : `<p style="margin:0 0 10px;font-size:13px;color:#64748b;">Hay huecos en la secuencia (${huecos.map((n) => `Muestra ${n}`).join(', ')}). Puedes enviar <b>una muestra</b> a la vez; el envío conjunto requiere secuencia continua.</p>`;
             if (window.Swal && typeof window.Swal.fire === 'function') {
                 const r = await swalFireSafe({
                     icon: 'question',
                     title: 'Selecciona muestra a enviar',
-                    html: '<p style="margin:0 0 10px;font-size:13px;color:#64748b;">Los N° siguen el orden de muestra (1, 2, 3…). Si envías solo una, las otras conservan su código en esta sesión.</p>',
+                    html: htmlSecuencia,
                     input: 'select',
                     inputOptions: opts,
                     inputValue: pref,
                     confirmButtonText: 'Enviar muestra',
-                    showDenyButton: true,
+                    showDenyButton: secuenciaContinua,
                     denyButtonText: 'Enviar muestras juntas',
                     showCancelButton: true,
                     cancelButtonText: 'Cancelar',
                     denyButtonColor: '#1f4f82',
                     allowOutsideClick: false
                 });
-                if (r.isDenied) return { modo: 'todas', ensayos: completos };
+                if (r.isDenied && secuenciaContinua) return { modo: 'todas', ensayos: completos };
                 if (!r.isConfirmed) return null;
                 return { modo: 'una', ensayo: String(r.value || '').trim() || pref };
             }
@@ -6073,7 +6567,7 @@
         async function enviarMuestrasEnSecuencia_(ensayos) {
             const ordenados = ordenarEnsayosPorNumeroMuestra(ensayos);
             if (!ordenados.length) return;
-            const secuenciaOk = await validarSecuenciaMuestraSinHuecos();
+            const secuenciaOk = await validarSecuenciaMuestrasListasParaEnvio(ordenados);
             if (!secuenciaOk) return;
             snapshotMetaEnsayoActual();
             await precongelarNumerosMuestraParaEnvio(ordenados);
@@ -6127,15 +6621,16 @@
 
         /** Cola de sync + toasts (compartido por modal resumen y botón fijo Campo). */
         async function finalizarEncoladoYSync(ensayoObjetivo) {
+            await prepararDeteccionEnvioCampo();
             const ensayoBase = String(ensayoObjetivo || obtenerEnsayoActivo() || 'Ensayo 1');
+            const completosPrevios = obtenerEnsayosCompletosParaEnvio();
             const seleccion = await seleccionarEnsayoCompletoParaEnviar_(ensayoBase);
             if (!seleccion) {
-                if (obtenerEnsayosCompletosParaEnvio().length === 0) {
+                if (!completosPrevios.length) {
                     const camposCompletos = await validarCamposRequeridosAntesDeEnviar(ensayoBase);
                     if (!camposCompletos) return;
-                } else {
-                    return;
                 }
+                return;
             }
             if (seleccion.modo === 'todas' && Array.isArray(seleccion.ensayos) && seleccion.ensayos.length) {
                 await enviarMuestrasEnSecuencia_(seleccion.ensayos);
@@ -6203,9 +6698,6 @@
             const btn = document.getElementById('btn-guardar-enviar-campo');
             setButtonLoading(btn, true, 'Enviando...');
             try {
-            snapshotMetaEnsayoActual();
-            aplicarNumMuestraParaEnsayoActivo('preEnviar');
-            persistirLogisticaAcopioDesdeInputs();
             guardarDraftCompleto();
             renderizarTarjetas();
             await finalizarEncoladoYSync();
@@ -6217,42 +6709,11 @@
 
         window.guardarRegistroYEnviarDesdePantalla = guardarRegistroYEnviarDesdePantalla;
 
+        /** @deprecated Usar enviarModalResumenGlobalWhatsApp — conserva placa/guía local sin envío a planilla. */
         async function guardarModalResumenGlobal() {
-            if (envioRegistroEnCurso) return;
-            envioRegistroEnCurso = true;
-            const btn = document.getElementById('btn-save-resumen-global');
-            setButtonLoading(btn, true, 'Guardando...');
-            try {
-            const ensayos = [...new Set(data.map((item) => String(item.ensayo || '').trim()).filter(Boolean))];
-            const joinPorEnsayo = {};
-            ensayos.forEach((ensayo) => {
-                joinPorEnsayo[ensayo] = unirPesosVisualConJarrasEnsayo(ensayo);
-            });
-            try {
-                window.__joinVisualJarras = joinPorEnsayo;
-            } catch (e) { /* ignore */ }
-
-            ensayos.forEach((ensayo) => {
-                const placaInput = document.querySelector('[data-ensayo-placa="' + ensayo + '"]');
-                const guiaInput = document.querySelector('[data-ensayo-guia="' + ensayo + '"]');
-                const placa = (placaInput?.value || '').trim().toUpperCase();
-                const guia = (guiaInput?.value || '').trim();
-                ensayoMeta[ensayo] = { placaVehiculo: placa, guiaRemision: guia };
-                data.forEach((item) => {
-                    if ((item.ensayo || 'Ensayo 1') === ensayo) {
-                        item.placaVehiculo = placa;
-                        item.guiaRemision = guia;
-                    }
-                });
-            });
+            persistirInputsResumenModalGlobal_();
             cerrarModalResumen();
-            renderizarTarjetas();
-            sincronizarLogisticaAcopioDesdeEnsayo();
-            await finalizarEncoladoYSync();
-            } finally {
-                setButtonLoading(btn, false);
-                envioRegistroEnCurso = false;
-            }
+            mostrarToast('success', 'Guardado', 'Placa y guía guardadas localmente.');
         }
 
         
@@ -6479,7 +6940,7 @@
 
         const draftRestaurado = restaurarDraftCompleto();
         purgarTodosNumerosMuestraEnMeta();
-        setTimeout(() => reaplicarCatalogoYMetaGuardada(), 0);
+        arranqueCatalogoYMetaCampo_();
         reconstruirEnsayosEnUsoSesionDesdeEstado();
         ensayoActivo = obtenerEnsayoActivo();
         recalcularPresionesParaTodos();

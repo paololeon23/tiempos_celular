@@ -1,20 +1,34 @@
 /**
- * PDF Agrovision (Campo) — Hoja 1 igual al formulario físico PE-F-QPH-306.
+ * PDF Agrovision (Packing) — Formulario físico PE-F-OPH-309.
  */
-(function campoPdfModule() {
-    const LOGO_URL = './log.png';
+(function packingPdfModule() {
+    const LOGO_URL = '../log.png';
+    const PACKING_PDF_FILAS = 21;
+    /** Etiquetas de etapa en una sola línea (Tiempos, Pesos, Humedad, hoja 2). */
+    const STAGE_LABELS_PDF = [
+        'RECEPCIÓN',
+        'INGRESO GASIFICADO',
+        'SALIDA GASIFICADO',
+        'INGRESO PREFRIO',
+        'SALIDA PREFRIO'
+    ];
+    /** Solo bloque TEMPERATURA MUESTRA (°C): dos líneas por etapa. */
+    const STAGE_LABELS_TEMP_PDF = [
+        ['RECEPCIÓN'],
+        ['INGRESO', 'GASIFICADO'],
+        ['SALIDA', 'GASIFICADO'],
+        ['INGRESO', 'PREFRIO'],
+        ['SALIDA', 'PREFRIO']
+    ];
     const PAGE = { w: 297, h: 210, margin: 7 };
     const GRIS_CABECERA = { r: 217, g: 217, b: 217 };
-    /** Igual que Excel «Girar texto hacia arriba»: 90° CCW, centrado en la celda. */
     const ANGULO_EXCEL_HACIA_ARRIBA = 90;
-    /** Tamaño unificado de cabeceras (referencia: INICIO DE COSECHA). */
     const FS_CABECERA_TABLA = 6.4;
     const FS_CABECERA_GRUPO = FS_CABECERA_TABLA;
     const FS_CABECERA_VERTICAL = FS_CABECERA_TABLA;
     const FS_CABECERA_VERTICAL_MIN = 3.5;
     const PAD_CELDA_VERTICAL_X = 3.9;
     const PAD_CELDA_VERTICAL_Y = 1.5;
-    /** jsPDF 2.x no rota bien con center/middle; centrado geométrico vía left/bottom. */
     const ANCLAJE_VERTICAL = {
         angle: ANGULO_EXCEL_HACIA_ARRIBA,
         align: 'left',
@@ -23,8 +37,7 @@
 
     let logoDataUrlCache = null;
     let pdfBlobActual = null;
-    let pdfNombreActual = 'medicion-arandano.pdf';
-    let pdfMensajeWhatsAppActual = '';
+    let pdfNombreActual = 'medicion-recepcion-arandano.pdf';
     let pdfUrlActual = null;
     let pdfjsLibInited = false;
     let pdfPreviewSession = null;
@@ -33,17 +46,17 @@
 
     function workerSrcPdfJs() {
         try {
-            return new URL('librerias/pdf.worker.min.js', document.baseURI || window.location.href).href;
+            return new URL('../librerias/pdf.worker.min.js', document.baseURI || window.location.href).href;
         } catch (_) {
-            return './librerias/pdf.worker.min.js';
+            return '../librerias/pdf.worker.min.js';
         }
     }
 
     function standardFontsUrlPdfJs() {
         try {
-            return new URL('librerias/standard_fonts/', document.baseURI || window.location.href).href;
+            return new URL('../librerias/standard_fonts/', document.baseURI || window.location.href).href;
         } catch (_) {
-            return './librerias/standard_fonts/';
+            return '../librerias/standard_fonts/';
         }
     }
 
@@ -133,7 +146,6 @@
         return PAGE.w - PAGE.margin * 2;
     }
 
-    /** Margen extra para que el contenido no se corte al imprimir (ambas hojas). */
     function layoutHojaImpresion() {
         const insetX = 8;
         const insetBottom = 5;
@@ -153,6 +165,130 @@
     function valCelda(v) {
         const s = txt(v);
         return s === '' ? '' : s;
+    }
+
+    const FS_DATO_TABLA = 6.2;
+    const IDX_COL_ROTULO = 1;
+    const IDX_COL_VARIEDAD = 5;
+    const IDX_COL_PLACA = 6;
+    const IDX_COL_GUIA = 7;
+    /** Rótulo, variedad, placa y guía: 3 filas unidas, texto vertical 6.2 pt. */
+    const COLS_CELDA_DOBLE_PDF = new Set([1, 5, 6, 7]);
+    const FILAS_UNION_CELDA_DOBLE = 3;
+    const PAD_DATO_VERTICAL_X = 3.5;
+    const PAD_DATO_VERTICAL_Y = 3.5;
+    /** Rótulo, placa y guía: un poco más a la derecha dentro de la celda. */
+    const PAD_DATO_VERTICAL_IZQ_X = 4.65;
+    const COLS_PAD_DATO_IZQ_X = new Set([IDX_COL_ROTULO, IDX_COL_PLACA, IDX_COL_GUIA]);
+    /** Variedad: 3.2 mm izquierdo, anclado abajo con texto un poco más arriba. */
+    const PAD_VARIEDAD_IZQ_X = 3.2;
+    const PAD_VARIEDAD_TOP_Y = 2.0;
+    const PAD_VARIEDAD_BOTTOM_Y = 6.5;
+    const PAD_DATO_VERTICAL_X_DER = 2.0;
+    /** Referencia permitida sin recorte: "Sekoya Pop" / "Orgánica". */
+    const VARIEDAD_TEXTO_REF = 'Sekoya Pop Orgánica';
+    const VARIEDAD_MAX_CHARS = VARIEDAD_TEXTO_REF.length;
+
+    function lineasVariedadParaPdf(texto) {
+        const s = valCelda(texto);
+        if (!s) return [];
+        const org = s.match(/^(.+?)\s+(Orgánica|Organica|Org\.?)$/i);
+        if (org) return [org[1].trim(), org[2].trim()];
+        const hifen = s.match(/^(.+)-([^-]+)$/);
+        if (hifen) return [`${hifen[1].trim()}-`, hifen[2].trim()];
+        const parts = s.split(/\s+/).filter(Boolean);
+        if (parts.length >= 2) {
+            const mid = Math.ceil(parts.length / 2);
+            return [parts.slice(0, mid).join(' '), parts.slice(mid).join(' ')];
+        }
+        return [s];
+    }
+
+    function prepararLineasVariedadParaPdf(doc, texto, colW, cellH) {
+        void doc;
+        void colW;
+        void cellH;
+        const s = valCelda(texto);
+        if (!s) return [];
+
+        if (s.length <= VARIEDAD_MAX_CHARS) {
+            return lineasVariedadParaPdf(s);
+        }
+
+        const resto = s.slice(VARIEDAD_MAX_CHARS).trim();
+        const sufijo = resto ? ` ${resto[0]}…` : '…';
+        return lineasVariedadParaPdf(`${s.slice(0, VARIEDAD_MAX_CHARS).trimEnd()}${sufijo}`);
+    }
+
+    function optsCeldaDatoPdf(doc, colIdx, val, colW, cellH) {
+        const opts = { fontSize: FS_DATO_TABLA };
+        if (COLS_PAD_DATO_IZQ_X.has(colIdx)) {
+            opts.padLeft = PAD_DATO_VERTICAL_IZQ_X;
+        } else if (colIdx === IDX_COL_VARIEDAD) {
+            opts.lineas = prepararLineasVariedadParaPdf(doc, val, colW, cellH);
+            opts.padLeft = PAD_VARIEDAD_IZQ_X;
+            opts.padRight = PAD_DATO_VERTICAL_X_DER;
+            opts.padTop = PAD_VARIEDAD_TOP_Y;
+            opts.padBottom = PAD_VARIEDAD_BOTTOM_Y;
+            opts.alinearAbajo = true;
+            opts.gapLineas = 0;
+        }
+        return { opts, texto: valCelda(val) };
+    }
+
+    function esCeldaDoblePacking(colIdx, rowIdx) {
+        return COLS_CELDA_DOBLE_PDF.has(colIdx) && rowIdx < FILAS_UNION_CELDA_DOBLE;
+    }
+
+    function esInicioCeldaDoblePacking(colIdx, rowIdx) {
+        return esCeldaDoblePacking(colIdx, rowIdx) && rowIdx === 0;
+    }
+
+    function esContinuacionCeldaDoblePacking(colIdx, rowIdx) {
+        return COLS_CELDA_DOBLE_PDF.has(colIdx) && rowIdx > 0 && rowIdx < FILAS_UNION_CELDA_DOBLE;
+    }
+
+    /** Dato girado hacia arriba (90°), centrado con margen en celda de 3 filas. */
+    function dibujarCeldaDatoVertical(doc, x, y, w, h, texto, opts) {
+        const o = opts || {};
+        borde(doc, x, y, w, h);
+        const lines = o.lineas && o.lineas.length
+            ? o.lineas.map((ln) => valCelda(ln)).filter(Boolean)
+            : (valCelda(texto) ? [valCelda(texto)] : []);
+        if (!lines.length) return;
+
+        const fs = o.fontSize || FS_DATO_TABLA;
+        const padLeft = o.padLeft != null ? o.padLeft : PAD_DATO_VERTICAL_X;
+        const padRight = o.padRight != null ? o.padRight : PAD_DATO_VERTICAL_X;
+        const padTop = o.padTop != null ? o.padTop : PAD_DATO_VERTICAL_Y;
+        const padBottom = o.padBottom != null ? o.padBottom : PAD_DATO_VERTICAL_Y;
+        const gap = o.gapLineas != null ? o.gapLineas : fs * 0.24;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(fs);
+
+        const dims = lines.map((ln) => medirTextoHorizontal(doc, ln, fs));
+        const anchoBloque = dims.reduce((a, d) => a + d.alto, 0) + gap * Math.max(0, lines.length - 1);
+        const altoMaxLinea = Math.max(...dims.map((d) => d.ancho), 0);
+
+        let tx = x + padLeft + Math.max(0, (w - padLeft - padRight - anchoBloque) / 2);
+
+        const usableH = Math.max(0, h - padTop - padBottom);
+        let ty;
+        if (o.alinearAbajo) {
+            ty = y + h - padBottom;
+            if (ty - altoMaxLinea < y + padTop) {
+                ty = y + padTop + altoMaxLinea;
+            }
+        } else if (usableH > altoMaxLinea) {
+            ty = y + padTop + altoMaxLinea + (usableH - altoMaxLinea) / 2;
+        } else {
+            ty = y + padTop + altoMaxLinea;
+        }
+
+        lines.forEach((ln, i) => {
+            doc.text(ln, tx, ty, ANCLAJE_VERTICAL);
+            tx += dims[i].alto + (i < lines.length - 1 ? gap : 0);
+        });
     }
 
     async function cargarLogoDataUrl() {
@@ -184,9 +320,7 @@
     function nombreArchivoPdf(datos) {
         const f = txt(datos?.fecha || datos?.meta?.fecha || '').replace(/\//g, '-').replace(/\./g, '-');
         const trazRaw = txt(datos?.meta?.trazabilidadArchivo || datos?.meta?.trazabilidad || '').split(' / ')[0].trim();
-        const traz = trazRaw
-            .replace(/\s+/g, '')
-            .replace(/[\\/:*?"<>|]+/g, '-');
+        const traz = trazRaw.replace(/\s+/g, '').replace(/[\\/:*?"<>|]+/g, '-');
         const parteFecha = f || 'sin-fecha';
         const parteTraz = traz || 'sin-traz';
         return `${parteFecha}_${parteTraz}.pdf`;
@@ -225,8 +359,15 @@
         const lines = doc.splitTextToSize(String(texto), maxW);
         const lineH = fs * 0.4;
         const blockH = lines.length * lineH;
-        let ty = y + (h - blockH) / 2 + lineH * 0.85;
+        let ty;
+        if (o.valign === 'top') {
+            ty = y + pad + lineH * 0.85;
+        } else {
+            ty = y + (h - blockH) / 2 + lineH * 0.85;
+        }
+        const yMax = y + h - pad;
         lines.forEach((ln) => {
+            if (ty > yMax) return;
             if (align === 'left') doc.text(ln, x + pad, ty, { align: 'left' });
             else doc.text(ln, x + w / 2, ty, { align: 'center' });
             ty += lineH;
@@ -237,7 +378,6 @@
         return String(texto).split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
     }
 
-    /** Anclaje left/bottom + angle 90: centro geométrico del texto rotado en la celda. */
     function anclajeVerticalCentrado(x, y, w, h, dim, padX) {
         const px = padX != null ? padX : PAD_CELDA_VERTICAL_X;
         return {
@@ -246,7 +386,6 @@
         };
     }
 
-    /** Tamaño inicial para texto vertical (soporta varias líneas con \\n). */
     function fontVerticalInicial(texto, w, h) {
         const lines = lineasVertical(texto);
         const n = Math.max(1, lines.length);
@@ -271,7 +410,6 @@
         };
     }
 
-    /** Texto vertical (90° CCW), una línea por celda — centrado geométrico (como PESO 1). */
     function dibujarCeldaVertical(doc, x, y, w, h, texto, opts) {
         const o = opts || {};
         if (o.fillGray) rellenoGris(doc, x, y, w, h);
@@ -290,10 +428,7 @@
 
         let dim = medirTextoHorizontal(doc, t, fs);
         if (!o.fsFijo) {
-            while (
-                (dim.alto > w - padX * 2 || dim.ancho > h - padY * 2)
-                && fs > fsMin
-            ) {
+            while ((dim.alto > w - padX * 2 || dim.ancho > h - padY * 2) && fs > fsMin) {
                 fs -= 0.08;
                 doc.setFontSize(fs);
                 dim = medirTextoHorizontal(doc, t, fs);
@@ -304,7 +439,6 @@
         doc.text(t, tx, ty, ANCLAJE_VERTICAL);
     }
 
-    /** Cabeceras con varias líneas (temperatura, traslado). */
     function dibujarCeldaVerticalConLineas(doc, x, y, w, h, lineas, opts) {
         const o = opts || {};
         if (o.fillGray) rellenoGris(doc, x, y, w, h);
@@ -402,10 +536,7 @@
         if (linea2) {
             doc.setFontSize(fs2);
             const scale = doc.internal.scaleFactor || 1;
-            while (
-                (doc.getStringUnitWidth(linea2) * fs2) / scale > maxTitW
-                && fs2 > 5.2
-            ) {
+            while ((doc.getStringUnitWidth(linea2) * fs2) / scale > maxTitW && fs2 > 5.2) {
                 fs2 -= 0.1;
                 doc.setFontSize(fs2);
             }
@@ -424,7 +555,7 @@
         const padDer = 2;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.8);
-        doc.text(`Código: ${datos.codigo || 'PE-F-QPH-306'}`, xDer + padDer, y0 + 6.2, { align: 'left' });
+        doc.text(`Código: ${datos.codigo || 'PE-F-OPH-309'}`, xDer + padDer, y0 + 6.2, { align: 'left' });
         doc.text(`Versión: ${datos.version || '1'}`, xDer + padDer, y0 + 12.2, { align: 'left' });
 
         return y0 + headH + 0.75;
@@ -435,7 +566,6 @@
         return (doc.getStringUnitWidth(String(texto)) * fs) / scale;
     }
 
-    /** Etiqueta y valor en la misma línea, justo después del «:». */
     function dibujarCampoMeta(doc, x, y, w, label, val) {
         const padIzq = 6;
         const padDer = 2;
@@ -482,43 +612,19 @@
         }
     }
 
-    /** Meta: 3 filas × 3 columnas, sin cuadro exterior (igual al formulario PE-F-QPH-306). */
-    function bloqueMeta(doc, datos, yStart, layout) {
+    /** Meta packing: FECHA DE INSPECCIÓN + RESPONSABLE. */
+    function bloqueMetaPacking(doc, datos, yStart, layout) {
         const m = layout?.margin ?? PAGE.margin;
         const W = layout?.width ?? contentWidth();
         const meta = datos.meta || {};
-        const desplazDer = 5;
-        const metaW = W - desplazDer;
-        const colW = metaW / 3;
+        const colW = W / 2;
         const rowH = 6.75;
         const padSup = 1.75;
         const padInf = 2;
-        const filas = [
-            [
-                { label: 'FECHA:', val: meta.fecha || datos.fecha },
-                { label: 'TRAZABILIDAD:', val: meta.trazabilidad },
-                { label: 'RESPONSABLE:', val: meta.responsable }
-            ],
-            [
-                { label: 'GUIA DE REMISIÓN ACOPIO CAMPO:', val: meta.guiaRemision },
-                { label: 'RÓTULO DE MUESTRA:', val: meta.rotulo || datos.ensayo },
-                { label: 'HORA DE INICIO GENERAL:', val: meta.horaInicio }
-            ],
-            [
-                { label: 'VARIEDAD:', val: meta.variedad },
-                { label: 'PLACA DEL VEHÍCULO:', val: meta.placa },
-                { label: 'DIAS DE PRECOSECHA/Nº DE COSECHA:', val: meta.precosecha }
-            ]
-        ];
-
         let y = yStart + padSup;
-        filas.forEach((fila) => {
-            fila.forEach((cell, c) => {
-                dibujarCampoMeta(doc, m + desplazDer + c * colW, y, colW, cell.label, cell.val);
-            });
-            y += rowH;
-        });
-        return y + padInf;
+        dibujarCampoMeta(doc, m, y, colW, 'FECHA DE INSPECCIÓN:', meta.fecha || datos.fecha);
+        dibujarCampoMeta(doc, m + colW, y, colW, 'RESPONSABLE:', meta.responsable);
+        return y + rowH + padInf;
     }
 
     function disclaimer(doc, layout) {
@@ -538,99 +644,97 @@
         doc.setFont('helvetica', 'normal');
     }
 
-    function generarHoja1(doc, datos, logoUrl) {
+    function valoresFilaPacking(fila) {
+        const f = fila || {};
+        const temps = [];
+        for (let i = 0; i < 5; i++) {
+            temps.push(f[`tempAmb${i}`] ?? f.tempAmb?.[i] ?? '');
+            temps.push(f[`tempPulpa${i}`] ?? f.tempPulpa?.[i] ?? '');
+        }
+        return [
+            f.horaInicio, f.rotulo, f.etapa, f.campo, f.turno, f.variedad, f.placa, f.guia, f.viaje,
+            f.tRecep, f.tIngGas, f.tSalGas, f.tIngPre, f.tSalPre,
+            f.pRecep, f.pIngGas, f.pSalGas, f.pIngPre, f.pSalPre,
+            ...temps,
+            f.hRecep, f.hIngGas, f.hSalGas, f.hIngPre, f.hSalPre
+        ];
+    }
+
+    function generarHoja1Packing(doc, datos, logoUrl) {
         const layout = layoutHojaImpresion();
         const m = layout.margin;
         const W = layout.width;
         let y = encabezadoPagina(doc, datos, datos.tituloHoja1, logoUrl, layout);
-        y = bloqueMeta(doc, datos, y, layout);
+        y = bloqueMetaPacking(doc, datos, y, layout);
 
         const weights = [
-            1.85, 1.95,
-            2.5, 2.5, 2.5, 2.5, 2.5, 2.6, 2.6,
-            2.8, 3.0, 2.8, 2.6, 2.6,
-            3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3,
-            2.6, 3.2, 2.4, 2.4, 2.6
+            2.4, 2.2, 1.8, 1.8, 1.8, 2.0, 2.2, 2.2, 1.8,
+            2.4, 2.4, 2.4, 2.4, 2.4,
+            2.4, 2.4, 2.4, 2.4, 2.4,
+            2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+            2.2, 2.2, 2.2, 2.2, 2.2
         ];
         const cw = pesosColumnas(weights, W);
-        const nCols = 27;
-        const idxTemp = 14;
-        const nTemp = 8;
+        const nCols = 34;
+        const idxTemp = 19;
+        const nTemp = 10;
 
         const hGroup = 7;
         const hDetalleUnico = 42;
         const hTempEv = 20;
         const hTempSub = 22;
         const hHeadTotal = hGroup + hDetalleUnico;
-        /** Formato físico: 8 filas con datos + 4 vacías; altura fija (no estirar al pie). */
-        const nFilasDatos = 8;
-        const nFilasVacias = 4;
-        const nFilasCuerpo = nFilasDatos + nFilasVacias;
-        const hRow = 5.9;
-        const hFoot = 11;
+        const nFilasCuerpo = PACKING_PDF_FILAS;
         const yTab = y;
+        const yBodyStart = yTab + hHeadTotal;
+        const yBodyEnd = layout.bottomY - 8;
+        const hRow = Math.min(5.9, Math.max(3.5, (yBodyEnd - yBodyStart) / nFilasCuerpo));
         const yDet = yTab + hGroup;
 
-        const subLabels = [
-            'Nº CLAMSHELL', 'Nº JARRA',
-            'PESO 1', 'PESO 2', 'PESO 3', 'PESO 4', 'PESO 5',
-            'LLEGADA ACOPIO - CAMPO', 'DESPACHO ACOPIO - CAMPO',
-            'INICIO DE COSECHA', 'INICIO DE PERDIDA DE PESO', 'TÉRMINO DE COSECHA',
-            'LLEGADA ACOPIO - CAMPO', 'DESPACHO ACOPIO - CAMPO',
-            '', '', '', '', '', '', '', '',
-            'Nº DE JARRA - LLENADO', 'TRASLADO U OTRA OBSERVACION', 'INICIO', 'TERMINO', 'TIEMPO EMPLEADO'
+        const infoLabels = [
+            'HORA INICIO RECEPCIÓN', 'RÓTULO MUESTRA', 'ETAPA', 'CAMPO', 'TURNO',
+            'VARIEDAD', 'N° PLACA CAMIONETA', 'N° GUÍA DESPACHO', 'N° VIAJE'
         ];
-
-        const tempEventsLineas = [
-            ['INICIO DE', 'COSECHA'],
-            ['TÉRMINO DE', 'COSECHA'],
-            ['LLEGADA', 'ACOPIO', 'CAMPO'],
-            ['DESPACHO', 'ACOPIO -', 'CAMPO']
-        ];
-        const trasladoLineas = ['TRASLADO U OTRA', 'OBSERVACION'];
+        const idxTiempos = 9;
+        const idxPesos = 14;
         const tempSubLabels = ['T° AMBIENTE', 'T° PULPA'];
 
         const labelsGroup = [
-            { i: 2, n: 7, t: 'PESO BRUTO (G)' },
+            { i: 0, n: 9, t: 'INFORMACIÓN MUESTRA' },
             { i: 9, n: 5, t: 'TIEMPOS DE LA MUESTRA (HORA)' },
-            { i: 14, n: 8, t: 'TEMPERATURA MUESTRA(°C)' },
-            { i: 22, n: 5, t: 'TIEMPO DE LLENADO DE JARRAS (HORA)' }
+            { i: 14, n: 5, t: 'PESO BRUTO MUESTRA (GR)' },
+            { i: 19, n: 10, t: 'TEMPERATURA MUESTRA (°C)' },
+            { i: 29, n: 5, t: 'HUMEDAD RELATIVA (%)' }
         ];
 
         const vHdr = { bold: true, fillGray: true, fontSize: FS_CABECERA_TABLA, fsFijo: true };
-        const PADX_TIEMPOS_MUESTRA = 4.2;
-        const idxPadTiemposMuestra = new Set([9, 10, 11, 12, 13]);
-        const wClamJarra = cw[0] + cw[1];
-        /** N° CLAMSHELL + N° JARRA: hueco blanco arriba (sin borde arriba/izquierda, como formato físico). */
-        doc.setFillColor(255, 255, 255);
-        doc.rect(m, yTab, wClamJarra, hGroup, 'F');
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.2);
-        doc.line(m + wClamJarra, yTab, m + wClamJarra, yDet);
-        rellenoGris(doc, m, yDet, wClamJarra, hDetalleUnico);
-        doc.line(m + cw[0], yDet, m + cw[0], yDet + hDetalleUnico);
-        dibujarCeldaVertical(doc, m, yDet, cw[0], hDetalleUnico, subLabels[0], { ...vHdr, fillGray: false });
-        dibujarCeldaVertical(doc, m + cw[0], yDet, cw[1], hDetalleUnico, subLabels[1], { ...vHdr, fillGray: false });
 
-        /** Grupos (PESO BRUTO, etc.) solo desde columna 3. */
-        let x = m + wClamJarra;
+        let x = m;
         labelsGroup.forEach((g) => {
             const w = cw.slice(g.i, g.i + g.n).reduce((a, b) => a + b, 0);
             dibujarCelda(doc, x, yTab, w, hGroup, g.t, { fontSize: FS_CABECERA_GRUPO, bold: true, fillGray: true });
             x += w;
         });
 
-        const yTempEv = yDet;
-        const yTempSub = yDet + hTempEv;
-
-        for (let i = 2; i < idxTemp; i++) {
+        for (let i = 0; i < 9; i++) {
             const xi = m + cw.slice(0, i).reduce((a, b) => a + b, 0);
-            const hdrCol = idxPadTiemposMuestra.has(i) ? { ...vHdr, padX: PADX_TIEMPOS_MUESTRA } : vHdr;
-            dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, subLabels[i], hdrCol);
+            dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, infoLabels[i], vHdr);
         }
 
+        for (let i = idxTiempos; i < idxPesos; i++) {
+            const xi = m + cw.slice(0, i).reduce((a, b) => a + b, 0);
+            dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, STAGE_LABELS_PDF[i - idxTiempos], vHdr);
+        }
+
+        for (let i = idxPesos; i < idxTemp; i++) {
+            const xi = m + cw.slice(0, i).reduce((a, b) => a + b, 0);
+            dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, STAGE_LABELS_PDF[i - idxPesos], vHdr);
+        }
+
+        const yTempEv = yDet;
+        const yTempSub = yDet + hTempEv;
         let xt = m + cw.slice(0, idxTemp).reduce((a, b) => a + b, 0);
-        tempEventsLineas.forEach((lineas, ei) => {
+        STAGE_LABELS_TEMP_PDF.forEach((lineas, ei) => {
             const w = cw[idxTemp + ei * 2] + cw[idxTemp + ei * 2 + 1];
             dibujarCeldaVerticalConLineas(doc, xt, yTempEv, w, hTempEv, lineas, vHdr);
             xt += w;
@@ -638,124 +742,61 @@
 
         xt = m + cw.slice(0, idxTemp).reduce((a, b) => a + b, 0);
         for (let i = 0; i < nTemp; i++) {
-            dibujarCeldaVertical(
-                doc,
-                xt,
-                yTempSub,
-                cw[idxTemp + i],
-                hTempSub,
-                tempSubLabels[i % 2],
-                vHdr
-            );
+            dibujarCeldaVertical(doc, xt, yTempSub, cw[idxTemp + i], hTempSub, tempSubLabels[i % 2], vHdr);
             xt += cw[idxTemp + i];
         }
 
-        for (let i = 22; i < nCols; i++) {
+        for (let i = 29; i < nCols; i++) {
             const xi = m + cw.slice(0, i).reduce((a, b) => a + b, 0);
-            if (i === 23) {
-                dibujarCeldaVerticalConLineas(doc, xi, yDet, cw[i], hDetalleUnico, trasladoLineas, vHdr);
-            } else {
-                dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, subLabels[i], vHdr);
-            }
+            dibujarCeldaVertical(doc, xi, yDet, cw[i], hDetalleUnico, STAGE_LABELS_PDF[i - 29], vHdr);
         }
 
         y = yTab + hHeadTotal;
-
         for (let ri = 0; ri < nFilasCuerpo; ri++) {
             const fila = (datos.filas || [])[ri] || {};
+            const vals = valoresFilaPacking(fila);
             x = m;
-            const vals = [
-                fila.nClam,
-                fila.jarra,
-                fila.p1, fila.p2, fila.p3, fila.p4, fila.p5, fila.llegada, fila.despacho,
-                fila.tInicioCosecha, fila.tPerdida, fila.tTermino, fila.tLlegada, fila.tDespacho,
-                fila.tempInicioAmb, fila.tempInicioPul, fila.tempTerminoAmb, fila.tempTerminoPul,
-                fila.tempLlegadaAmb, fila.tempLlegadaPul, fila.tempDespachoAmb, fila.tempDespachoPul,
-                fila.jarraLlenado, fila.trasladoObs, fila.jarraInicio, fila.jarraTermino, fila.jarraTiempo
-            ];
             cw.forEach((w, i) => {
-                dibujarCelda(doc, x, y, w, hRow, valCelda(vals[i]), { fontSize: 6.2, pad: 0.4 });
+                if (esContinuacionCeldaDoblePacking(i, ri)) {
+                    x += w;
+                    return;
+                }
+                const hCelda = esInicioCeldaDoblePacking(i, ri) ? hRow * FILAS_UNION_CELDA_DOBLE : hRow;
+                const { opts, texto } = optsCeldaDatoPdf(doc, i, vals[i], w, hCelda);
+                if (esInicioCeldaDoblePacking(i, ri)) {
+                    dibujarCeldaDatoVertical(doc, x, y, w, hCelda, texto, opts);
+                } else {
+                    dibujarCelda(doc, x, y, w, hCelda, texto, opts);
+                }
                 x += w;
             });
             y += hRow;
         }
 
-        const yFootTop = y;
-        const idxObsFoot = 7;
-        const xPesado = m;
-        const pesadoW = cw[0] + cw[1];
-        const xObs = m + cw.slice(0, idxObsFoot).reduce((a, b) => a + b, 0);
-        const obsW = W - cw.slice(0, idxObsFoot).reduce((a, b) => a + b, 0);
-
-        rellenoGris(doc, xPesado, yFootTop, pesadoW, hFoot);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(5.6);
-        const lhPesado = 2.45;
-        const etiquetaPesado = ['HORA', 'DE', 'PESADO'];
-        const bloquePesadoH = lhPesado * etiquetaPesado.length;
-        let yPesadoLbl = yFootTop + (hFoot - bloquePesadoH) / 2 + lhPesado * 0.85;
-        etiquetaPesado.forEach((ln) => {
-            doc.text(ln, xPesado + pesadoW / 2, yPesadoLbl, { align: 'center' });
-            yPesadoLbl += lhPesado;
-        });
-
-        let xPieMid = xPesado + pesadoW;
-        for (let ci = 2; ci < idxObsFoot; ci++) {
-            borde(doc, xPieMid, yFootTop, cw[ci], hFoot);
-            xPieMid += cw[ci];
-        }
-
-        borde(doc, xObs, yFootTop, obsW, hFoot);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(6.2);
-        doc.text('OBSERVACIONES:', xObs + 2, yFootTop + 4);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6);
-        const obsFormato = txt(datos.observacionesFormato);
-        if (obsFormato) {
-            const lineas = doc.splitTextToSize(obsFormato, obsW - 4);
-            let yObs = yFootTop + 7;
-            const lh = 2.8;
-            const yMax = yFootTop + hFoot - 1;
-            lineas.forEach((linea) => {
-                if (yObs > yMax) return;
-                doc.text(linea, xObs + 2, yObs);
-                yObs += lh;
-            });
-        }
-        if (txt(datos.horaPesado)) {
-            doc.setFontSize(6);
-            doc.text(datos.horaPesado, xPesado + pesadoW / 2, yFootTop + hFoot - 1.2, { align: 'center' });
-        }
-
         disclaimer(doc, layout);
     }
 
-    function generarHoja2(doc, datos, logoUrl) {
+    function generarHoja2Packing(doc, datos, logoUrl) {
         const layout = layoutHojaImpresion();
         const m = layout.margin;
         const W = layout.width;
         let y = encabezadoPagina(doc, datos, datos.tituloHoja2, logoUrl, layout);
-        y = bloqueMeta(doc, datos, y, layout);
+        y = bloqueMetaPacking(doc, datos, y, layout);
 
         const p2 = datos.pagina2 || {};
-        const eventos = ['INICIO DE COSECHA', 'TÉRMINO DE COSECHA', 'LLEGADA ACOPIO', 'DESPACHO- ACOPIO'];
         const grupos = [
-            { tit: 'HUMEDAD RELATIVA(%)', vals: p2.humedad || [] },
-            { tit: 'TEMPERATURA AMBIENTE (°C)', vals: p2.tempAmbiente || [] },
             { tit: 'PRESIÓN DE VAPOR AMBIENTE (Kpa)', vals: p2.presionAmb || [] },
-            { tit: 'PRESIÓN DE VAPOR FRUTA (Kpa)', vals: p2.presionFruta || [] }
+            { tit: 'PRESIÓN DE VAPOR FRUTA (Kpa)', vals: p2.presionFruta || [] },
+            { tit: 'DÉFICIT DE PRESIÓN DE VAPOR (Kpa)', vals: p2.deficit || [] }
         ];
 
         const obsW = W * 0.26;
         const dataW = W - obsW;
-        const colW = dataW / 16;
+        const colW = dataW / 15;
         const hG = 7;
         const hSub = 36;
-        const hData = 7.5;
-        const hFilaVacia = 5.8;
-        const ySig = layout.bottomY - 18;
-        const filasVacias = Math.max(11, Math.floor((ySig - y - hG - hSub - hData - 8) / hFilaVacia));
+        const nFilasCuerpo = PACKING_PDF_FILAS;
+        const ySigReserva = 18;
 
         function listaObservacionesP2(pagina2) {
             if (Array.isArray(pagina2?.observacionesLista)) {
@@ -769,19 +810,18 @@
         const obsLista = listaObservacionesP2(p2);
         const yTab = y;
         const obsX = m + dataW;
-
         const ySub = yTab + hG;
         const hObsHdr = hG + hSub;
 
         grupos.forEach((g, gi) => {
-            const xg = m + gi * colW * 4;
-            dibujarCelda(doc, xg, yTab, colW * 4, hG, g.tit, { fontSize: FS_CABECERA_GRUPO, bold: true, fillGray: true });
+            const xg = m + gi * colW * 5;
+            dibujarCelda(doc, xg, yTab, colW * 5, hG, g.tit, { fontSize: FS_CABECERA_GRUPO, bold: true, fillGray: true });
         });
         rellenoGris(doc, obsX, yTab, obsW, hObsHdr);
 
         let x = m;
-        for (let i = 0; i < 16; i++) {
-            dibujarCeldaVertical(doc, x, ySub, colW, hSub, eventos[i % 4], {
+        for (let i = 0; i < 15; i++) {
+            dibujarCeldaVertical(doc, x, ySub, colW, hSub, STAGE_LABELS_PDF[i % 5], {
                 fillGray: true,
                 bold: true,
                 fontSize: FS_CABECERA_TABLA,
@@ -793,33 +833,25 @@
         doc.setFontSize(FS_CABECERA_TABLA);
         doc.text('OBSERVACIONES', obsX + obsW / 2, ySub + hSub / 2 + 2, { align: 'center' });
 
-        const yData = ySub + hSub;
-        x = m;
+        const yBodyStart = ySub + hSub;
+        const yBodyEnd = layout.bottomY - ySigReserva;
+        const hRow = Math.min(5.9, Math.max(3.5, (yBodyEnd - yBodyStart) / nFilasCuerpo));
         const filaVals = [];
         grupos.forEach((g) => (g.vals || []).forEach((v) => filaVals.push(v)));
-        for (let i = 0; i < 16; i++) {
-            dibujarCelda(doc, x, yData, colW, hData, valCelda(filaVals[i]), { fontSize: 6.2, pad: 0.4 });
-            x += colW;
-        }
-        dibujarCelda(doc, obsX, yData, obsW, hData, valCelda(obsLista[0]), {
-            fontSize: 6.2,
-            pad: 0.4,
-            align: 'center'
-        });
 
-        y = yData + hData;
-        for (let r = 0; r < filasVacias; r++) {
+        for (let r = 0; r < nFilasCuerpo; r++) {
+            const yRow = yBodyStart + r * hRow;
             x = m;
-            for (let i = 0; i < 16; i++) {
-                dibujarCelda(doc, x, y, colW, hFilaVacia, '', { fontSize: 6.2, pad: 0.4 });
+            for (let i = 0; i < 15; i++) {
+                const val = r === 0 ? valCelda(filaVals[i]) : '';
+                dibujarCelda(doc, x, yRow, colW, hRow, val, { fontSize: 6.2, pad: 0.4 });
                 x += colW;
             }
-            dibujarCelda(doc, obsX, y, obsW, hFilaVacia, valCelda(obsLista[r + 1]), {
+            dibujarCelda(doc, obsX, yRow, obsW, hRow, valCelda(obsLista[r]), {
                 fontSize: 6.2,
                 pad: 0.4,
                 align: 'center'
             });
-            y += hFilaVacia;
         }
 
         disclaimer(doc, layout);
@@ -835,313 +867,15 @@
         doc.text('Supervisor de Calidad-Packing', m + W - 42, ySigLine + 8.5, { align: 'center' });
     }
 
-    async function generarPdfCampoBlob(datos) {
+    async function generarPdfPackingBlob(datos) {
         const JsPDF = obtenerJsPDF();
         if (!JsPDF) throw new Error('jsPDF no está cargado');
         const logoUrl = await cargarLogoDataUrl();
         const doc = new JsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-        generarHoja1(doc, datos, logoUrl);
+        generarHoja1Packing(doc, datos, logoUrl);
         doc.addPage('a4', 'landscape');
-        generarHoja2(doc, datos, logoUrl);
+        generarHoja2Packing(doc, datos, logoUrl);
         return doc.output('blob');
-    }
-
-    const PAGE_AVANCE = { w: 210, h: 297, margin: 14 };
-    const AZUL_AVANCE = { r: 15, g: 74, b: 125 };
-    const GRIS_AVANCE = { r: 241, g: 245, b: 249 };
-
-    function nombreArchivoPdfAvance(datos) {
-        const f = txt(datos?.fecha || '').replace(/\//g, '-');
-        const num = txt(datos?.muestras?.[0]?.meta?.numMuestra || '').replace(/\s+/g, '');
-        const ensayo = txt(datos?.muestras?.[0]?.meta?.muestraLabel || '').replace(/\s+/g, '-');
-        return `avance-packing_${f || 'fecha'}_${num || ensayo || 'muestra'}.pdf`;
-    }
-
-    function textoResumenWhatsAppAvance(datos) {
-        const lineas = ['*Avance para Packing*', `Fecha: ${txt(datos?.fecha) || '—'}`];
-        (datos?.muestras || []).forEach((bloque) => {
-            const m = bloque.meta || {};
-            lineas.push('');
-            lineas.push(`*${txt(m.muestraLabel) || txt(m.ensayo)}* · N° ${txt(m.numMuestra) || '—'}`);
-            if (txt(m.trazabilidad)) lineas.push(`Traz: ${txt(m.trazabilidad)}`);
-            if (txt(m.variedad)) lineas.push(`Variedad: ${txt(m.variedad)}`);
-            if (txt(m.placa)) lineas.push(`Placa: ${txt(m.placa)}`);
-            if (txt(m.guia)) lineas.push(`Guía acopio: ${txt(m.guia)}`);
-            (bloque.clamshells || []).forEach((c) => {
-                const peso = txt(c.pesoDespacho);
-                const hora = txt(c.horaDespacho);
-                const det = [
-                    peso ? `${peso}g` : '',
-                    hora ? `hora ${hora}` : ''
-                ].filter(Boolean).join(' · ');
-                lineas.push(`Clamshell #${c.clamshell}: ${det || 'sin despacho aún'}`);
-            });
-        });
-        lineas.push('', '_PDF adjunto con detalle._');
-        return lineas.join('\n');
-    }
-
-    function dibujarBloqueMetaAvance(doc, x, y, w, titulo, filas) {
-        const pad = 2;
-        const labelW = 40;
-        const titleH = 5;
-        const rowH = 5;
-        const h = pad + titleH + filas.length * rowH + pad;
-        doc.setFillColor(GRIS_AVANCE.r, GRIS_AVANCE.g, GRIS_AVANCE.b);
-        doc.setDrawColor(AZUL_AVANCE.r, AZUL_AVANCE.g, AZUL_AVANCE.b);
-        doc.setLineWidth(0.3);
-        doc.roundedRect(x, y, w, h, 1.5, 1.5, 'FD');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor(AZUL_AVANCE.r, AZUL_AVANCE.g, AZUL_AVANCE.b);
-        doc.text(titulo, x + pad, y + pad + 3.2);
-        doc.setTextColor(30, 41, 59);
-        let cy = y + pad + titleH;
-        filas.forEach(([label, value]) => {
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(7);
-            doc.text(String(label), x + pad, cy + 3);
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(7.5);
-            const val = txt(value) || '—';
-            const valLines = doc.splitTextToSize(val, w - labelW - pad * 2);
-            doc.text(valLines[0] || '—', x + pad + labelW, cy + 3);
-            cy += rowH;
-        });
-        return y + h + 5;
-    }
-
-    /** Encabezado en 3 columnas — mismas medidas que PDF Campo/Packing. */
-    function dibujarEncabezadoAvancePacking(doc, datos, logoUrl, m, W) {
-        const y0 = m;
-        const headH = 17;
-        const colIzqW = 52;
-        const colDerW = 46;
-        const colMidW = W - colIzqW - colDerW;
-        const xIzq = m;
-        const xMid = m + colIzqW;
-        const xDer = m + colIzqW + colMidW;
-
-        doc.setDrawColor(AZUL_AVANCE.r, AZUL_AVANCE.g, AZUL_AVANCE.b);
-        doc.setLineWidth(0.35);
-        doc.setTextColor(0, 0, 0);
-        doc.rect(m, y0, W, headH);
-        doc.line(xMid, y0, xMid, y0 + headH);
-        doc.line(xDer, y0, xDer, y0 + headH);
-
-        const logoW = 13;
-        const logoH = 13;
-        const logoX = xIzq + (colIzqW - logoW) / 2;
-        const logoY = y0 + 0.6;
-        if (logoUrl) {
-            try {
-                doc.addImage(logoUrl, 'PNG', logoX, logoY, logoW, logoH);
-            } catch (_) { /* ignore */ }
-        }
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text('AGROVISION', xIzq + colIzqW / 2, y0 + headH - 2.6, { align: 'center' });
-
-        const midCx = xMid + colMidW / 2;
-        const maxTitW = colMidW - 4;
-        const linea1 = 'AVANCE PARA PACKING';
-        const linea2 = 'Campo - referencia operativa (no reemplaza registro completo)';
-        doc.setFont('helvetica', 'bold');
-        let fs1 = 9.5;
-        let fs2 = 7.2;
-        doc.setFontSize(fs2);
-        const scale = doc.internal.scaleFactor || 1;
-        while (
-            (doc.getStringUnitWidth(linea2) * fs2) / scale > maxTitW
-            && fs2 > 5.2
-        ) {
-            fs2 -= 0.1;
-            doc.setFontSize(fs2);
-        }
-        const gapTit = 3;
-        const blockH = fs1 * 0.35 + gapTit + fs2 * 0.35;
-        let ty = y0 + (headH - blockH) / 2 + fs1 * 0.3;
-        doc.setFontSize(fs1);
-        doc.text(linea1, midCx, ty, { align: 'center' });
-        ty += gapTit + fs1 * 0.05;
-        doc.setFontSize(fs2);
-        doc.setFont('helvetica', 'normal');
-        doc.text(linea2, midCx, ty, { align: 'center' });
-
-        const padDer = 2;
-        const generado = txt(datos?.generadoEn) || '—';
-        const fecha = txt(datos?.fecha) ? `Fecha: ${txt(datos.fecha)}` : 'Fecha: —';
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.8);
-        doc.text(generado, xDer + padDer, y0 + 6.2, { align: 'left' });
-        doc.text(fecha, xDer + padDer, y0 + 12.2, { align: 'left' });
-
-        return y0 + headH + 4;
-    }
-
-    function generarHojaAvancePacking(doc, datos, logoUrl) {
-        const m = PAGE_AVANCE.margin;
-        const W = PAGE_AVANCE.w - m * 2;
-        let y = dibujarEncabezadoAvancePacking(doc, datos, logoUrl, m, W);
-
-        (datos?.muestras || []).forEach((bloque, idx) => {
-            if (y > PAGE_AVANCE.h - 55) {
-                doc.addPage('a4', 'portrait');
-                y = m;
-            }
-            const meta = bloque.meta || {};
-            if (idx > 0) y += 4;
-            y += 3;
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(10);
-            doc.setTextColor(AZUL_AVANCE.r, AZUL_AVANCE.g, AZUL_AVANCE.b);
-            doc.text(`${txt(meta.muestraLabel) || txt(meta.ensayo)} · N° ${txt(meta.numMuestra) || '—'}`, m, y + 3.5);
-            y += 8;
-
-            y = dibujarBloqueMetaAvance(doc, m, y, W, 'Identificación', [
-                ['Trazabilidad', meta.trazabilidad],
-                ['Fundo', meta.fundo],
-                ['Variedad', meta.variedad],
-                ['Responsable', meta.responsable]
-            ]);
-
-            y = dibujarBloqueMetaAvance(doc, m, y, W, 'Logística acopio-campo', [
-                ['Placa vehículo', meta.placa],
-                ['Guía remisión acopio', meta.guia]
-            ]);
-
-            const cols = [16, 14, 26, 22, 22, 22, W - 122];
-            const headers = ['Clamshell', 'Jarra', 'Peso despacho', 'Hora desp.', 'Temp. amb.', 'Temp. pulpa', 'Observación'];
-            const headH = 8;
-            const rowH = 9;
-            const filas = bloque.clamshells || [];
-            const tableH = headH + Math.max(1, filas.length) * rowH;
-
-            if (y + tableH > PAGE_AVANCE.h - m) {
-                doc.addPage('a4', 'portrait');
-                y = m;
-            }
-
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(8.5);
-            doc.setTextColor(AZUL_AVANCE.r, AZUL_AVANCE.g, AZUL_AVANCE.b);
-            y += 3;
-            doc.text('Despacho acopio-campo por clamshell', m, y + 3);
-            y += 7;
-
-            let cx = m;
-            doc.setFillColor(AZUL_AVANCE.r, AZUL_AVANCE.g, AZUL_AVANCE.b);
-            doc.rect(m, y, W, headH, 'F');
-            doc.setTextColor(255, 255, 255);
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(6.8);
-            headers.forEach((h, i) => {
-                if (i > 0) {
-                    doc.setDrawColor(255, 255, 255);
-                    doc.line(cx, y, cx, y + headH);
-                }
-                doc.text(h, cx + cols[i] / 2, y + headH / 2 + 2, { align: 'center' });
-                cx += cols[i];
-            });
-            doc.setDrawColor(200, 210, 220);
-            borde(doc, m, y, W, headH);
-            y += headH;
-
-            const cuerpo = filas.length ? filas : [{ clamshell: '—', jarra: '—', pesoDespacho: '', horaDespacho: '', tempAmb: '', tempPulpa: '', observacion: '' }];
-            cuerpo.forEach((fila, ri) => {
-                if (y + rowH > PAGE_AVANCE.h - m) {
-                    doc.addPage('a4', 'portrait');
-                    y = m;
-                }
-                cx = m;
-                const vals = [
-                    `#${txt(fila.clamshell) || ri + 1}`,
-                    txt(fila.jarra),
-                    txt(fila.pesoDespacho) ? `${txt(fila.pesoDespacho)} g` : '—',
-                    txt(fila.horaDespacho),
-                    txt(fila.tempAmb) ? `${txt(fila.tempAmb)}°C` : '—',
-                    txt(fila.tempPulpa) ? `${txt(fila.tempPulpa)}°C` : '—',
-                    txt(fila.observacion)
-                ];
-                vals.forEach((v, i) => {
-                    const fill = ri % 2 === 0;
-                    if (fill) {
-                        doc.setFillColor(248, 250, 252);
-                        doc.rect(cx, y, cols[i], rowH, 'F');
-                    }
-                    borde(doc, cx, y, cols[i], rowH);
-                    doc.setTextColor(30, 41, 59);
-                    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-                    doc.setFontSize(7);
-                    dibujarCelda(doc, cx, y, cols[i], rowH, v, { fontSize: 7, align: i >= 2 ? 'center' : 'center', pad: 1 });
-                    cx += cols[i];
-                });
-                y += rowH;
-            });
-            y += 6;
-        });
-
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(6.5);
-        doc.setTextColor(100, 116, 139);
-        doc.text('Documento informativo para Packing. El registro completo de Campo se envía al finalizar la muestra.', m, PAGE_AVANCE.h - m);
-    }
-
-    async function generarPdfAvancePackingBlob(datos) {
-        const JsPDF = obtenerJsPDF();
-        if (!JsPDF) throw new Error('jsPDF no está cargado');
-        const logoUrl = await cargarLogoDataUrl();
-        const doc = new JsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        generarHojaAvancePacking(doc, datos, logoUrl);
-        return doc.output('blob');
-    }
-
-    async function compartirPdfPorWhatsApp(blob, nombre, mensajeTexto) {
-        if (!blob) return;
-        const file = new File([blob], nombre || 'avance-packing.pdf', { type: 'application/pdf' });
-        const titulo = (nombre || 'avance-packing.pdf').replace('.pdf', '');
-        const texto = txt(mensajeTexto);
-        if (navigator.share) {
-            try {
-                const payload = texto
-                    ? { title: titulo, text: texto, files: [file] }
-                    : { title: titulo, files: [file] };
-                if (!navigator.canShare || navigator.canShare(payload)) {
-                    await navigator.share(payload);
-                    return true;
-                }
-            } catch (err) {
-                if (err && err.name === 'AbortError') return false;
-            }
-        }
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = nombre || 'avance-packing.pdf';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-        const msg = encodeURIComponent(texto || `${titulo}\n(Adjunta el PDF descargado)`);
-        window.open(`https://wa.me/?text=${msg}`, '_blank', 'noopener,noreferrer');
-        return true;
-    }
-
-    async function generarYEnviarPdfAvancePacking(datos) {
-        if (!obtenerJsPDF()) {
-            throw new Error('Biblioteca PDF no cargada. Conéctate una vez a internet para precargar.');
-        }
-        const blob = await generarPdfAvancePackingBlob(datos);
-        const nombre = nombreArchivoPdfAvance(datos);
-        const mensaje = textoResumenWhatsAppAvance(datos);
-        pdfMensajeWhatsAppActual = mensaje;
-        const titleEl = document.getElementById('pdf-modal-title');
-        if (titleEl) titleEl.textContent = 'Avance para Packing';
-        const modalPromise = abrirModalPdf(blob, nombre);
-        const wspPromise = compartirPdfPorWhatsApp(blob, nombre, mensaje);
-        await Promise.all([modalPromise, wspPromise]);
-        return true;
-    }
-
-    function precalentarPdfAvancePacking() {
-        void cargarLogoDataUrl();
     }
 
     function escalaPdfZoomClamped(valor) {
@@ -1265,134 +999,108 @@
         if (!stage || stage.dataset.zoomBound === '1') return;
         stage.dataset.zoomBound = '1';
 
-        let pinchInicio = 0;
-        let escalaInicio = 1;
-        let ultimoTap = 0;
+        let pinchStartDist = 0;
+        let pinchStartZoom = 1;
 
-        stage.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 2) {
-                pinchInicio = distanciaToques(e.touches[0], e.touches[1]);
-                escalaInicio = pdfZoomState.scale;
+        stage.addEventListener('touchstart', (ev) => {
+            if (ev.touches.length === 2) {
+                pinchStartDist = distanciaToques(ev.touches[0], ev.touches[1]);
+                pinchStartZoom = pdfZoomState.scale;
             }
         }, { passive: true });
 
-        stage.addEventListener('touchmove', (e) => {
-            if (e.touches.length !== 2 || !pinchInicio) return;
-            const ratio = distanciaToques(e.touches[0], e.touches[1]) / pinchInicio;
-            pdfZoomState.scale = escalaPdfZoomClamped(escalaInicio * ratio);
+        stage.addEventListener('touchmove', (ev) => {
+            if (ev.touches.length !== 2 || pinchStartDist <= 0) return;
+            const dist = distanciaToques(ev.touches[0], ev.touches[1]);
+            const ratio = dist / pinchStartDist;
+            pdfZoomState.scale = escalaPdfZoomClamped(pinchStartZoom * ratio);
             aplicarPdfZoomPreview();
         }, { passive: true });
 
-        stage.addEventListener('touchend', (e) => {
-            const habiaPinch = !!pinchInicio;
-            if (e.touches.length < 2) pinchInicio = 0;
-            if (habiaPinch) {
+        stage.addEventListener('touchend', () => {
+            if (pinchStartDist > 0) {
+                pinchStartDist = 0;
                 void comprometerPdfZoom();
-                return;
-            }
-            const ahora = Date.now();
-            if (e.changedTouches.length === 1 && ahora - ultimoTap < 320) {
-                pdfZoomState.scale = pdfZoomState.scale < 1.45 ? 2 : 1;
-                void comprometerPdfZoom();
-                ultimoTap = 0;
-            } else {
-                ultimoTap = ahora;
             }
         }, { passive: true });
     }
 
     function limpiarVistaPreviaPdf() {
-        const pages = document.getElementById('pdf-preview-pages');
-        if (pdfPreviewSession?.zoomTimer) {
-            clearTimeout(pdfPreviewSession.zoomTimer);
-        }
-        pdfPreviewSession = null;
-        if (pages) pages.innerHTML = '';
         ocultarVisorPdfNativo();
-        pdfZoomState.scale = 1;
-        actualizarEtiquetaPdfZoom(1);
-        const scaler = document.getElementById('pdf-preview-scaler');
-        if (scaler) scaler.style.transform = '';
+        pdfPreviewSession = null;
+        const pages = document.getElementById('pdf-preview-pages');
+        if (pages) pages.innerHTML = '';
         estadoVistaPreviaPdf('loading');
+        resetPdfZoom();
     }
 
-    async function renderizarVistaPreviaPdfCanvas(blob) {
-        const stage = document.getElementById('pdf-preview-stage');
-        const pagesEl = document.getElementById('pdf-preview-pages');
-        if (!stage || !pagesEl) return false;
+    async function renderizarVistaPreviaPdf(blob) {
+        limpiarVistaPreviaPdf();
+        estadoVistaPreviaPdf('loading');
 
-        ocultarVisorPdfNativo();
+        if (prefiereVisorPdfNativo() && pdfUrlActual && mostrarVisorPdfNativo(pdfUrlActual)) {
+            return;
+        }
+
         const lib = obtenerPdfJs();
-        if (!lib) return false;
+        if (!lib) {
+            estadoVistaPreviaPdf('error');
+            return;
+        }
 
-        const data = await blob.arrayBuffer();
+        const pagesEl = document.getElementById('pdf-preview-pages');
+        const stage = document.getElementById('pdf-preview-stage');
+        if (!pagesEl || !stage) {
+            estadoVistaPreviaPdf('error');
+            return;
+        }
+
+        const buf = await blob.arrayBuffer();
+        const data = new Uint8Array(buf);
+
         let pdf;
         try {
             pdf = await cargarPdfParaVista(lib, data, false);
         } catch (errWorker) {
-            console.warn('[PDF preview] reintento sin worker', errWorker);
-            pdf = await cargarPdfParaVista(lib, data, true);
+            console.warn('[PDF preview packing] reintento sin worker', errWorker);
+            try {
+                pdf = await cargarPdfParaVista(lib, data, true);
+            } catch (err) {
+                console.warn('[PDF preview packing]', err);
+                estadoVistaPreviaPdf('error');
+                return;
+            }
         }
 
-        const ancho = Math.max(260, (stage.clientWidth || window.innerWidth || 320) - 24);
-        pagesEl.innerHTML = '';
+        const ancho = Math.max(280, Math.min(stage.clientWidth - 8, 920));
+        const numPages = pdf.numPages;
+        const pages = [];
+
+        for (let i = 1; i <= numPages; i++) {
+            const wrap = document.createElement('div');
+            wrap.className = 'pdf-preview-page-wrap';
+            const canvas = document.createElement('canvas');
+            canvas.className = 'pdf-preview-page-canvas';
+            wrap.appendChild(canvas);
+            pagesEl.appendChild(wrap);
+            pages.push({ pageNum: i, canvas, ctx: canvas.getContext('2d', { alpha: false }) });
+        }
+
         pdfPreviewSession = {
             pdf,
+            pages,
             ancho,
-            pages: [],
             renderGen: 0,
             lastRenderedZoom: 1,
             zoomTimer: null
         };
 
-        for (let p = 1; p <= pdf.numPages; p++) {
-            const page = await pdf.getPage(p);
-            await page.getTextContent();
-            const canvas = document.createElement('canvas');
-            canvas.className = 'pdf-preview-page';
-            const ctx = canvas.getContext('2d', { alpha: false });
-
-            const wrap = document.createElement('div');
-            wrap.className = 'pdf-preview-page-wrap';
-            if (pdf.numPages > 1) {
-                const lbl = document.createElement('span');
-                lbl.className = 'pdf-preview-page-label';
-                lbl.textContent = `Hoja ${p} / ${pdf.numPages}`;
-                wrap.appendChild(lbl);
-            }
-            wrap.appendChild(canvas);
-            pagesEl.appendChild(wrap);
-            pdfPreviewSession.pages.push({ pageNum: p, canvas, ctx, wrap });
-        }
-
-        estadoVistaPreviaPdf('ready');
-        pdfZoomState.scale = 1;
-        await renderizarPdfPreviewZoom(1);
-        return true;
-    }
-
-    async function renderizarVistaPreviaPdf(blob) {
-        const stage = document.getElementById('pdf-preview-stage');
-        if (!stage) return false;
-
-        limpiarVistaPreviaPdf();
-        await esperarLayoutModal();
-
-        if (prefiereVisorPdfNativo() && pdfUrlActual && mostrarVisorPdfNativo(pdfUrlActual)) {
-            return true;
-        }
-
         try {
-            const ok = await renderizarVistaPreviaPdfCanvas(blob);
-            if (!ok) estadoVistaPreviaPdf('error');
-            return ok;
+            await renderizarPdfPreviewZoom(1);
+            estadoVistaPreviaPdf('ready');
         } catch (err) {
-            console.warn('[PDF preview]', err);
-            if (pdfUrlActual && prefiereVisorPdfNativo() && mostrarVisorPdfNativo(pdfUrlActual)) {
-                return true;
-            }
+            console.warn('[PDF preview packing]', err);
             estadoVistaPreviaPdf('error');
-            return false;
         }
     }
 
@@ -1411,7 +1119,7 @@
 
     async function abrirModalPdf(blob, nombre) {
         pdfBlobActual = blob;
-        pdfNombreActual = nombre || 'medicion-arandano.pdf';
+        pdfNombreActual = nombre || 'medicion-recepcion-arandano.pdf';
         const ov = document.getElementById('pdf-modal-overlay');
         if (!ov) return;
         revocarPdfUrlActual();
@@ -1435,13 +1143,26 @@
 
     async function compartirWhatsAppPdf() {
         if (!pdfBlobActual) return;
+        const file = new File([pdfBlobActual], pdfNombreActual, { type: 'application/pdf' });
         const titulo = pdfNombreActual.replace('.pdf', '');
-        const msg = pdfMensajeWhatsAppActual || `${titulo}\n(Adjunta el PDF descargado)`;
-        await compartirPdfPorWhatsApp(pdfBlobActual, pdfNombreActual, msg);
+        if (navigator.share) {
+            try {
+                const payload = { title: titulo, files: [file] };
+                if (!navigator.canShare || navigator.canShare(payload)) {
+                    await navigator.share(payload);
+                    return;
+                }
+            } catch (err) {
+                if (err && err.name === 'AbortError') return;
+            }
+        }
+        descargarPdfActual();
+        const msg = encodeURIComponent(`${titulo}\n(Adjunta el PDF descargado)`);
+        window.open(`https://wa.me/?text=${msg}`, '_blank', 'noopener,noreferrer');
     }
 
-    async function generarYMostrarPdfCampo() {
-        if (typeof window.obtenerDatosPdfCampo !== 'function') {
+    async function generarYMostrarPdfPacking() {
+        if (typeof window.obtenerDatosPdfPacking !== 'function') {
             if (window.Swal) {
                 window.Swal.fire({ icon: 'error', title: 'PDF no disponible', text: 'Recarga la página e intenta de nuevo.' });
             }
@@ -1453,11 +1174,8 @@
             if (!obtenerJsPDF()) {
                 throw new Error('Biblioteca PDF no cargada. Conéctate una vez a internet para precargar.');
             }
-            pdfMensajeWhatsAppActual = '';
-            const titleEl = document.getElementById('pdf-modal-title');
-            if (titleEl) titleEl.textContent = 'Vista previa PDF';
-            const datos = window.obtenerDatosPdfCampo();
-            const blob = await generarPdfCampoBlob(datos);
+            const datos = window.obtenerDatosPdfPacking();
+            const blob = await generarPdfPackingBlob(datos);
             abrirModalPdf(blob, nombreArchivoPdf(datos));
         } catch (e) {
             const msg = e && e.message ? e.message : 'No se pudo generar el PDF.';
@@ -1471,11 +1189,10 @@
         }
     }
 
-    function initCampoPdf() {
-        precalentarPdfAvancePacking();
+    function initPackingPdf() {
         enlazarZoomVistaPreviaPdf();
         document.getElementById('fab-pdf-btn')?.addEventListener('click', () => {
-            void generarYMostrarPdfCampo();
+            void generarYMostrarPdfPacking();
         });
         document.getElementById('pdf-btn-cerrar')?.addEventListener('click', cerrarModalPdf);
         document.getElementById('pdf-btn-descargar')?.addEventListener('click', descargarPdfActual);
@@ -1492,13 +1209,10 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initCampoPdf);
+        document.addEventListener('DOMContentLoaded', initPackingPdf);
     } else {
-        initCampoPdf();
+        initPackingPdf();
     }
 
-    window.generarYMostrarPdfCampo = generarYMostrarPdfCampo;
-    window.generarYEnviarPdfAvancePacking = generarYEnviarPdfAvancePacking;
-    window.generarPdfAvancePackingBlob = generarPdfAvancePackingBlob;
-    window.precalentarPdfAvancePacking = precalentarPdfAvancePacking;
+    window.generarYMostrarPdfPacking = generarYMostrarPdfPacking;
 })();

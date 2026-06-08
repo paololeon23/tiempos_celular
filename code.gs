@@ -5,11 +5,13 @@
  *
  * ANTI-DUPLICADOS: UID + clave de fila normalizada.
  *
- * --- PACKING (cols 49–88) ---
+ * --- PACKING (cols 49–89) ---
  */
 var PACKING_START_COL = 49;
-var PACKING_COLS = 40;
-var THERMOKING_START_COL = PACKING_START_COL + PACKING_COLS; // 89
+var PACKING_META_COLS = 4;
+var PACKING_DATA_COLS = 37;
+var PACKING_COLS = PACKING_META_COLS + PACKING_DATA_COLS;
+var THERMOKING_START_COL = PACKING_START_COL + PACKING_COLS; // 90
 var THERMOKING_COLS = 39;
 var C5_START_COL = THERMOKING_START_COL + THERMOKING_COLS; // 128
 
@@ -337,7 +339,8 @@ function cellHasPackingValue_(v) {
 
 function rowHasPackingData_(arr) {
   if (!arr || !arr.length) return false;
-  for (var i = 0; i < arr.length; i++) {
+  var start = (arr.length >= PACKING_COLS) ? PACKING_META_COLS : 0;
+  for (var i = start; i < arr.length; i++) {
     if (cellHasPackingValue_(arr[i])) return true;
   }
   return false;
@@ -745,6 +748,20 @@ function formatFechaPacking(val) {
   return s;
 }
 
+function formatHoraRegistro_(val) {
+  if (val === null || val === undefined || val === '') return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, Session.getScriptTimeZone() || 'America/Lima', 'HH:mm');
+  }
+  var s = String(val).trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (m) {
+    return (m[1].length < 2 ? '0' + m[1] : m[1]) + ':' + m[2];
+  }
+  return s;
+}
+
 function getPackingHeaderNamesPerRow() {
   return [
     'RECEPCION', 'INGRESO_GASIFICADO', 'SALIDA_GASIFICADO', 'INGRESO_PREFRIO', 'SALIDA_PREFRIO',
@@ -753,8 +770,33 @@ function getPackingHeaderNamesPerRow() {
     'HUMEDAD_RECEPCION', 'HUMEDAD_INGRESO_GASIFICADO', 'HUMEDAD_SALIDA_GASIFICADO', 'HUMEDAD_INGRESO_PREFRIO', 'HUMEDAD_SALIDA_PREFRIO',
     'PRESION_AMB_RECEPCION', 'PRESION_AMB_INGRESO_GASIFICADO', 'PRESION_AMB_SALIDA_GASIFICADO', 'PRESION_AMB_INGRESO_PREFRIO', 'PRESION_AMB_SALIDA_PREFRIO',
     'PRESION_FRUTA_RECEPCION', 'PRESION_FRUTA_INGRESO_GASIFICADO', 'PRESION_FRUTA_SALIDA_GASIFICADO', 'PRESION_FRUTA_INGRESO_PREFRIO', 'PRESION_FRUTA_SALIDA_PREFRIO',
-    'OBSERVACION'
+    'OBSERVACION',
+    'HORA_REGISTRO'
   ];
+}
+
+/** Columna OBSERVACION del bloque packing (fila plana, sin sufijo _N). */
+function colObservacionPacking_(sheet) {
+  return PACKING_START_COL + PACKING_META_COLS + 35;
+}
+
+/** Columna HORA_REGISTRO del bloque packing (CK cuando packing inicia en 49). */
+function colHoraRegistroPacking_(sheet) {
+  return PACKING_START_COL + PACKING_META_COLS + 36;
+}
+
+/** Inserta columna HORA_REGISTRO tras OBSERVACION si la hoja aún tiene esquema packing de 40 cols. */
+function migrarInsertarHoraRegistroPacking_(sheet) {
+  if (!sheet || sheet.getLastRow() === 0) return;
+  var colObs = colObservacionPacking_(sheet);
+  var colHora = colHoraRegistroPacking_(sheet);
+  var hObs = String(sheet.getRange(1, colObs).getValue() || '').trim().toUpperCase();
+  var hHora = String(sheet.getRange(1, colHora).getValue() || '').trim().toUpperCase();
+  if (hObs === 'OBSERVACION' && hHora === 'HORA_REGISTRO') return;
+  if (hObs === 'OBSERVACION' && hHora !== 'HORA_REGISTRO') {
+    sheet.insertColumnAfter(colObs);
+    sheet.getRange(1, colHora).setValue('HORA_REGISTRO');
+  }
 }
 
 function getPackingHeaderNames(numFilas) {
@@ -769,6 +811,7 @@ function getPackingHeaderNames(numFilas) {
 
 function doPostPacking(sheet, data) {
   try {
+    migrarInsertarHoraRegistroPacking_(sheet);
     var guardarPacking = (data.guardar_packing === false || data.guardar_packing === 'false') ? false : true;
     var actualizarC5 = (data.actualizar_c5 === false || data.actualizar_c5 === 'false') ? false : true;
 
@@ -815,7 +858,7 @@ function doPostPacking(sheet, data) {
     if (packingYaExiste) {
       if (guardarPacking && packingRows.length) {
         var startColMerge = PACKING_START_COL;
-        var colsPorFilaMerge = 4 + 36;
+        var colsPorFilaMerge = PACKING_META_COLS + PACKING_DATA_COLS;
         var baseHeadersMerge = ['FECHA_INSPECCION', 'RESPONSABLE', 'HORA_RECEPCION', 'N_VIAJE'].concat(getPackingHeaderNamesPerRow());
         for (var pm = 0; pm < packingRows.length; pm++) {
           var filaIdxMerge = packingStartIndex + pm;
@@ -824,11 +867,13 @@ function doPostPacking(sheet, data) {
           var filaHojaMerge = rowIndices[filaIdxMerge];
           var valoresMerge = [fechaInspeccion, responsable, horaRecepcion, nViaje];
           if (Array.isArray(rowMerge)) {
-            for (var jm = 0; jm < 36; jm++) {
-              valoresMerge.push((jm < rowMerge.length && rowMerge[jm] != null && rowMerge[jm] !== '') ? rowMerge[jm] : '');
+            for (var jm = 0; jm < PACKING_DATA_COLS; jm++) {
+              var vMerge = (jm < rowMerge.length && rowMerge[jm] != null && rowMerge[jm] !== '') ? rowMerge[jm] : '';
+              if (jm === PACKING_DATA_COLS - 1 && !vMerge) vMerge = formatHoraRegistro_(new Date());
+              valoresMerge.push(vMerge);
             }
           } else {
-            for (var jm2 = 0; jm2 < 36; jm2++) valoresMerge.push('');
+            for (var jm2 = 0; jm2 < PACKING_DATA_COLS; jm2++) valoresMerge.push('');
           }
           sheet.getRange(filaHojaMerge, startColMerge, 1, colsPorFilaMerge).setValues([valoresMerge]);
         }
@@ -863,7 +908,7 @@ function doPostPacking(sheet, data) {
     }
 
     var startCol = PACKING_START_COL;
-    var COLS_POR_FILA = 4 + 36;
+    var COLS_POR_FILA = PACKING_META_COLS + PACKING_DATA_COLS;
     var baseHeaders = ['FECHA_INSPECCION', 'RESPONSABLE', 'HORA_RECEPCION', 'N_VIAJE'].concat(getPackingHeaderNamesPerRow());
 
     if (guardarPacking) {
@@ -874,11 +919,13 @@ function doPostPacking(sheet, data) {
         var filaHoja = rowIndices[filaIdx];
         var valores = [fechaInspeccion, responsable, horaRecepcion, nViaje];
         if (Array.isArray(row)) {
-          for (var j = 0; j < 36; j++) {
-            valores.push((j < row.length && row[j] != null && row[j] !== '') ? row[j] : '');
+          for (var j = 0; j < PACKING_DATA_COLS; j++) {
+            var vPack = (j < row.length && row[j] != null && row[j] !== '') ? row[j] : '';
+            if (j === PACKING_DATA_COLS - 1 && !vPack) vPack = formatHoraRegistro_(new Date());
+            valores.push(vPack);
           }
         } else {
-          for (var j = 0; j < 36; j++) valores.push('');
+          for (var j = 0; j < PACKING_DATA_COLS; j++) valores.push('');
         }
         sheet.getRange(filaHoja, startCol, 1, COLS_POR_FILA).setValues([valores]);
       }
@@ -1072,6 +1119,7 @@ function doGet(e) {
     }
 
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+    migrarInsertarHoraRegistroPacking_(sheet);
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) {
       result.error = 'No hay datos en la hoja';
@@ -1079,7 +1127,7 @@ function doGet(e) {
     }
 
     var idxNumRow = indiceColumnaNumMuestraHoja1_(sheet);
-    var dataColW = Math.max(20, idxNumRow + 1, NUM_COLS_REGISTRO);
+    var dataColW = Math.max(20, idxNumRow + 1, NUM_COLS_REGISTRO, PACKING_START_COL + PACKING_COLS - 1);
     var data = sheet.getRange(2, 1, lastRow, dataColW).getValues();
 
     function formatFecha(val) {
@@ -1111,30 +1159,79 @@ function doGet(e) {
       if (d && !isNaN(d.getTime())) return Utilities.formatDate(d, "GMT", "yyyy-MM-dd");
       return s;
     }
+    function tipoDatoDesdeFlags_(tieneCampo, tienePacking) {
+      if (tieneCampo && tienePacking) return 'ambos';
+      if (tienePacking) return 'packing';
+      return 'campo';
+    }
     var fecha = (fechaParam && formatFecha(fechaParam)) ? formatFecha(fechaParam) : fechaParam;
+
+    function fechasHistorialDefecto_() {
+      var tz = Session.getScriptTimeZone() || 'America/Lima';
+      var now = new Date();
+      var hoy = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+      var ayer = Utilities.formatDate(new Date(now.getTime() - 86400000), tz, 'yyyy-MM-dd');
+      return { desde: ayer, hasta: hoy };
+    }
+    function normalizarFechaParamHistorial_(val) {
+      var s = (val != null && val !== '') ? String(val).trim() : '';
+      if (!s) return '';
+      return formatFecha(s) || s;
+    }
+    function fechaEnRangoHistorial_(f, desde, hasta) {
+      if (!f) return false;
+      if (desde && f < desde) return false;
+      if (hasta && f > hasta) return false;
+      return true;
+    }
 
     var listadoReg = (params.listado_registrados || '').toString().trim() === '1';
     if (listadoReg) {
+      var rangoHist = fechasHistorialDefecto_();
+      var fechaDesdeHist = normalizarFechaParamHistorial_(params.fecha_desde) || rangoHist.desde;
+      var fechaHastaHist = normalizarFechaParamHistorial_(params.fecha_hasta) || rangoHist.hasta;
+      if (fechaDesdeHist && fechaHastaHist && fechaDesdeHist > fechaHastaHist) {
+        var tmpHist = fechaDesdeHist;
+        fechaDesdeHist = fechaHastaHist;
+        fechaHastaHist = tmpHist;
+      }
       var registrados = [];
+      var idxHoraReg = NUM_COLS_REGISTRO - 1;
+      var idxPackStart = PACKING_START_COL - 1;
       for (var i = 0; i < data.length; i++) {
         var r = data[i];
         var f = formatFecha(r[0]);
+        if (!fechaEnRangoHistorial_(f, fechaDesdeHist, fechaHastaHist)) continue;
         var en = r[13];
         var enStr = (en !== null && en !== undefined && en !== '') ? (Number(en) === Math.floor(Number(en)) ? String(Number(en)) : String(en).trim()) : '';
         var nom = (r[1] != null && r[1] !== undefined && String(r[1]).trim() !== '') ? String(r[1]).trim() : ('Ensayo ' + enStr);
         var numMuestra = (r.length > idxNumRow && r[idxNumRow] != null && r[idxNumRow] !== undefined) ? String(r[idxNumRow]).trim() : '';
         var nClamshell = (r[14] != null && r[14] !== undefined) ? String(r[14]).trim() : '';
         if (!f || enStr === '') continue;
+        var horaRegistro = (r.length > idxHoraReg) ? formatHoraRegistro_(r[idxHoraReg]) : '';
+        var packingSlice = [];
+        if (r.length > idxPackStart) {
+          var packEnd = Math.min(r.length, idxPackStart + PACKING_COLS);
+          packingSlice = r.slice(idxPackStart, packEnd);
+        }
+        var tienePacking = rowHasPackingData_(packingSlice);
+        var tieneCampo = !!(numMuestra || nClamshell || rowHasAnyNonEmpty_(r.slice(2, Math.min(r.length, idxHoraReg))));
         registrados.push({
           fecha: f,
           ensayo_numero: enStr,
           ensayo_nombre: nom,
           num_muestra: numMuestra,
-          n_clamshell: nClamshell
+          n_clamshell: nClamshell,
+          hora_registro: horaRegistro,
+          tiene_campo: tieneCampo,
+          tiene_packing: tienePacking,
+          tipo_dato: tipoDatoDesdeFlags_(tieneCampo, tienePacking)
         });
       }
       result.ok = true;
       result.registrados = registrados;
+      result.fecha_desde = fechaDesdeHist;
+      result.fecha_hasta = fechaHastaHist;
       return returnOutput(result);
     }
 

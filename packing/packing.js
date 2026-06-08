@@ -4,9 +4,23 @@
     const SYNC_QUEUE_KEY = 'tiempos-sync-queue-v1';
     const SYNC_HISTORY_KEY = 'tiempos-sync-history-v1';
     const SYNC_MAX_HISTORY = 200;
-    const PACKING_DRAFT_STORAGE_KEY = 'tiempos-packing-draft-v1';
+    const PACKING_ROW_COLS = 37;
+    const PACKING_ROW_IDX_OBS = 35;
+    const PACKING_ROW_IDX_HORA_REG = 36;
     const PACKING_CHIPS_COLLAPSED_KEY = 'packing-chips-collapsed-v1';
+    const PACKING_DRAFT_STORAGE_KEY = 'tiempos-packing-draft-v1';
+    const PACKING_PDF_FILAS = 21;
     const MIN_LOADER_MS = 350;
+
+    /** Plantilla JSON de demo: se aplica solo a la muestra activa en el selector. */
+    const PACKING_DEMO_PLANTILLA = {
+        responsable: 'Demo packing',
+        temperaturaAmb: ['12.5', '11.8', '11.2', '10.5', '10.0'],
+        temperaturaPulpa: ['11.0', '10.5', '10.0', '9.5', '9.0'],
+        humedad: ['85.0', '84.0', '83.0', '82.0', '81.0'],
+        offsetsTiemposMin: [0, 60, 120, 180, 240],
+        observacionPrefijo: 'SIM-'
+    };
 
     const elFecha = document.getElementById('packing-fecha');
     const elMuestra = document.getElementById('packing-muestra');
@@ -120,7 +134,9 @@
     let packingMuestraAnterior = '';
     let packingFechaAnterior = '';
     let packingRestaurandoBorrador = false;
+    let packingOmitirAutoguardado = false;
     let packingDraftSaveTimer = null;
+    let packingBadgeWasComplete = false;
 
     function pesosVaciosPacking() {
         return { recepcion: 0, ingresoGas: 0, salidaGas: 0, ingresoPre: 0, salidaPre: 0 };
@@ -161,17 +177,75 @@
         return v > l + 0.001;
     }
 
-    function getLimitePesoRecepcionPacking(clamshellNum) {
-        const d = lastDetallePacking;
-        if (!d) return null;
-        const porFila = Array.isArray(d.despachoPorFila) ? d.despachoPorFila : [];
+    function limitePesoDesdeDespachoCtx_(clamshellNum, ctx) {
+        if (!ctx || typeof ctx !== 'object') return null;
+        const porFila = Array.isArray(ctx.despachoPorFila) ? ctx.despachoPorFila : [];
         const idx = Math.max(0, Number(clamshellNum) - 1);
         let v = porFila[idx];
         if (v == null || v === '') {
-            v = d.DESPACHO_ACOPIO ?? d.despacho_acopio_gramos;
+            v = ctx.despachoAcopio ?? ctx.DESPACHO_ACOPIO ?? ctx.despacho_acopio_gramos;
         }
         const n = Number(v);
         return Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    function getLimitePesoRecepcionPacking(clamshellNum, quotaSnap) {
+        const snap = quotaSnap && typeof quotaSnap === 'object' ? quotaSnap : null;
+        const tieneSnapDespacho = snap && (
+            (Array.isArray(snap.despachoPorFila) && snap.despachoPorFila.length)
+            || snap.despachoAcopio != null
+        );
+        if (tieneSnapDespacho) {
+            return limitePesoDesdeDespachoCtx_(clamshellNum, snap);
+        }
+        const d = lastDetallePacking;
+        if (!d) return null;
+        return limitePesoDesdeDespachoCtx_(clamshellNum, {
+            despachoPorFila: d.despachoPorFila,
+            despachoAcopio: d.DESPACHO_ACOPIO ?? d.despacho_acopio_gramos
+        });
+    }
+
+    function capturarQuotaSnapshotPacking_() {
+        const snap = { ...packingQuota };
+        const d = lastDetallePacking;
+        if (d) {
+            snap.despachoPorFila = Array.isArray(d.despachoPorFila) ? d.despachoPorFila.slice() : [];
+            snap.despachoAcopio = d.DESPACHO_ACOPIO ?? d.despacho_acopio_gramos ?? null;
+        }
+        return snap;
+    }
+
+    function tiemposObjetoDesdeEstadoPacking_(estado) {
+        const arr = Array.isArray(estado?.tiempos) ? estado.tiempos : [];
+        return {
+            horaInicio: String(estado?.horaInicio || '').trim(),
+            recepcion: String(arr[0] || '').trim(),
+            ingresoGas: String(arr[1] || '').trim(),
+            salidaGas: String(arr[2] || '').trim(),
+            ingresoPre: String(arr[3] || '').trim(),
+            salidaPre: String(arr[4] || '').trim()
+        };
+    }
+
+    function recogerCandidatosMuestrasPackingDelDia_(fechaIso) {
+        const fecha = normalizarFechaIso(fechaIso);
+        const candidatos = new Set();
+        if (!fecha) return candidatos;
+        const store = leerStoreBorradorPacking();
+        const prefix = fecha + '::';
+        Object.keys(store.porClave || {}).forEach((key) => {
+            if (key.startsWith(prefix)) candidatos.add(key.slice(prefix.length));
+        });
+        const rawActivo = String(elMuestra?.value || '').trim();
+        if (rawActivo) candidatos.add(rawActivo);
+        if (elMuestra) {
+            Array.from(elMuestra.options).forEach((opt) => {
+                const v = String(opt.value || '').trim();
+                if (v) candidatos.add(v);
+            });
+        }
+        return candidatos;
     }
 
     function leerPesosModalPacking() {
@@ -310,7 +384,22 @@
 
     async function swalFirePacking(options) {
         if (!(window.Swal && typeof window.Swal.fire === 'function')) return null;
-        return window.Swal.fire(options || {});
+        const incoming = options || {};
+        const isToast = !!incoming.toast;
+        const opts = Object.assign({}, incoming);
+        if (!isToast) {
+            const active = document.activeElement;
+            if (active && typeof active.blur === 'function') active.blur();
+            opts.returnFocus = false;
+        } else {
+            delete opts.returnFocus;
+        }
+        return window.Swal.fire(opts);
+    }
+
+    async function confirmarSwalPacking_(options) {
+        const resp = await swalFirePacking(options);
+        return !!(resp && resp.isConfirmed);
     }
 
     function mostrarToastPacking(icono, titulo, texto) {
@@ -347,8 +436,9 @@
 
     function actualizarBtnEnviarPacking() {
         if (!elBtnEnviarPacking) return;
+        const completa = muestraPackingCompletaEnPantalla_();
         const baseOk = muestraSeleccionada()
-            && packingCards.length > 0
+            && completa
             && !elCardsWrap?.classList.contains('is-disabled')
             && !envioPackingEnCurso;
         elBtnEnviarPacking.disabled = !baseOk;
@@ -433,6 +523,743 @@
         return Math.max(0, max - packingQuota.filasPackingRegistradas - packingCards.length);
     }
 
+    function cuotaMaximaDesdeSnapshotPacking(snap) {
+        const s = snap && typeof snap === 'object' ? snap : {};
+        if (s.maxClamshell > 0) return s.maxClamshell;
+        if (s.filasTotalCampo > 0) return s.filasTotalCampo;
+        return 8;
+    }
+
+    function restantesDesdeEstadoMuestraPacking(estado, quotaSnap) {
+        const snap = quotaSnap && typeof quotaSnap === 'object' ? quotaSnap : {};
+        const max = cuotaMaximaDesdeSnapshotPacking(snap);
+        const enSrv = Number(snap.filasPackingRegistradas) || 0;
+        const cards = Array.isArray(estado?.packingCards) ? estado.packingCards.length : 0;
+        return Math.max(0, max - enSrv - cards);
+    }
+
+    function numeroEnsayoPackingDesdeRaw(raw) {
+        const parts = String(raw || '').split('|');
+        return Number(parts[1]) || 0;
+    }
+
+    function ordenarMuestrasPackingPorEnsayo_(lista) {
+        return (lista || []).slice().sort((a, b) => {
+            const na = numeroEnsayoPackingDesdeRaw(a.raw);
+            const nb = numeroEnsayoPackingDesdeRaw(b.raw);
+            return na - nb;
+        });
+    }
+
+    function detectarHuecosSecuenciaPacking_(completas) {
+        const numeros = ordenarMuestrasPackingPorEnsayo_(completas)
+            .map((c) => numeroEnsayoPackingDesdeRaw(c.raw))
+            .filter((n) => n > 0);
+        const huecos = [];
+        if (!numeros.length) return { numeros, huecos };
+        const min = numeros[0];
+        const max = numeros[numeros.length - 1];
+        for (let n = min; n <= max; n++) {
+            if (!numeros.includes(n)) huecos.push(n);
+        }
+        return { numeros, huecos };
+    }
+
+    function horaLocalActualPacking() {
+        const d = new Date();
+        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function buildPackingRowDesdeCardEstado(card, tiempos, control, horaRegistro) {
+        const row = new Array(PACKING_ROW_COLS).fill('');
+        const tArr = Array.isArray(tiempos) ? tiempos : [];
+        for (let i = 0; i < tArr.length && i < 5; i++) row[i] = String(tArr[i] || '').trim();
+        aplicarPesosPackingARow(row, card?.pesos || pesosVaciosPacking());
+        const cg = clonarControlStatePacking(control);
+        const t = cg.temperatura;
+        const h = cg.humedad;
+        const pAmb = cg.presionAmb;
+        const pFruta = cg.presionFruta;
+        for (let i = 0; i < 5; i++) {
+            row[10 + (i * 2)] = t.amb[i] || '';
+            row[11 + (i * 2)] = t.pulpa[i] || '';
+            row[20 + i] = h[i] || '';
+            row[25 + i] = pAmb[i] || '';
+            row[30 + i] = pFruta[i] || '';
+        }
+        row[PACKING_ROW_IDX_OBS] = String(card?.observacion || '').trim();
+        row[PACKING_ROW_IDX_HORA_REG] = String(horaRegistro || horaLocalActualPacking()).trim();
+        return row;
+    }
+
+    function getMetaEnvioPackingDesdeEstado_(estado, rawMuestra, fechaIso) {
+        const parts = String(rawMuestra || '').split('|');
+        const snap = estado?.packingQuotaSnapshot || packingQuota;
+        const cards = Array.isArray(estado?.packingCards) ? estado.packingCards : [];
+        const hora = String(estado?.horaInicio || '').trim();
+        const responsable = String(estado?.responsable || '').trim();
+        return {
+            mode: 'packing',
+            guardar_packing: true,
+            actualizar_c5: false,
+            guardar_thermoking: false,
+            fecha: fechaIso || elFecha?.value || '',
+            ensayo_numero: parts[1] || '',
+            num_muestra: parts[0] || '',
+            fecha_inspeccion: getFechaInspeccionPacking(),
+            responsable,
+            hora_recepcion: hora,
+            hora_inicio_recepcion_c5: hora,
+            packing_start_index: Number(snap.filasPackingRegistradas) || 0,
+            packingRows: (() => {
+                const horaReg = horaLocalActualPacking();
+                return cards.map((c) => buildPackingRowDesdeCardEstado(
+                    c,
+                    estado?.tiempos,
+                    estado?.control,
+                    horaReg
+                ));
+            })()
+        };
+    }
+
+    function validarCuotaClamshellsDesdeEstado_(estado, quotaSnap) {
+        const snap = quotaSnap && typeof quotaSnap === 'object' ? quotaSnap : {};
+        const max = cuotaMaximaDesdeSnapshotPacking(snap);
+        const enSrv = Number(snap.filasPackingRegistradas) || 0;
+        const cards = Array.isArray(estado?.packingCards) ? estado.packingCards.length : 0;
+        const total = enSrv + cards;
+        if (max <= 0) return { ok: true };
+        if (total >= max) return { ok: true };
+        return {
+            ok: false,
+            error: 'Debes completar los ' + max + ' clamshells del registro. Faltan '
+                + (max - total) + ' (' + total + '/' + max + ').'
+        };
+    }
+
+    function validarCompletitudPackingParaEnvioDesdeEstado_(estado, quotaSnap) {
+        const errores = [];
+        const cuota = validarCuotaClamshellsDesdeEstado_(estado, quotaSnap);
+        if (!cuota.ok) errores.push(cuota.error);
+
+        if (!String(estado?.horaInicio || '').trim()) {
+            errores.push(msgErrorGlobalPacking('Cabecera', 'Completa Hora inicio recepción.'));
+        }
+        if (!String(estado?.responsable || '').trim()) {
+            errores.push(msgErrorGlobalPacking('Cabecera', 'Completa Responsable.'));
+        }
+
+        const tiempos = Array.isArray(estado?.tiempos) ? estado.tiempos : [];
+        const ctDone = tiempos.filter((v) => String(v || '').trim()).length;
+        if (ctDone < TIEMPOS_MUESTRA_TOTAL) {
+            errores.push(
+                msgErrorTiemposPacking(
+                    'Completa las ' + TIEMPOS_MUESTRA_TOTAL + ' etapas (' + ctDone + '/' + TIEMPOS_MUESTRA_TOTAL + ').'
+                )
+            );
+        }
+        validarSecuenciaTiemposPacking(tiemposObjetoDesdeEstadoPacking_(estado)).forEach((e) => {
+            errores.push(msgErrorTiemposPacking(e));
+        });
+
+        const cg = recalcularPresionesDesdeControlPacking_(estado?.control);
+        const t = cg.temperatura;
+        const h = cg.humedad;
+        let faltanControl = false;
+        for (let i = 0; i < 5; i++) {
+            if (!controlGlobalPackingTieneDato(t.amb[i])
+                || !controlGlobalPackingTieneDato(t.pulpa[i])
+                || !controlGlobalPackingTieneDato(h[i])) {
+                faltanControl = true;
+                break;
+            }
+        }
+        if (faltanControl) {
+            errores.push(
+                msgErrorGlobalPacking(
+                    'Control',
+                    'Abre Temperatura y Humedad global y completa las 5 etapas.'
+                )
+            );
+        }
+
+        const cAmb = conteoPresionPacking(cg.presionAmb);
+        const cFruta = conteoPresionPacking(cg.presionFruta);
+        if (!faltanControl && cAmb.done < cAmb.total) {
+            errores.push(
+                msgErrorGlobalPacking(
+                    '☁️',
+                    'Revisa temperatura ambiente y humedad (' + cAmb.done + '/5).'
+                )
+            );
+        }
+        if (!faltanControl && cFruta.done < cFruta.total) {
+            errores.push(
+                msgErrorGlobalPacking(
+                    '🍎',
+                    'Revisa temperatura pulpa (' + cFruta.done + '/5).'
+                )
+            );
+        }
+
+        const pesoLabels = {
+            recepcion: 'Peso recepción',
+            ingresoGas: 'Peso I-GASIF.',
+            salidaGas: 'Peso S-GASIF.',
+            ingresoPre: 'Peso ingreso prefrío',
+            salidaPre: 'Peso salida prefrío'
+        };
+        const snapPesos = quotaSnap && typeof quotaSnap === 'object' ? quotaSnap : {};
+        const tieneDespachoSnap = (Array.isArray(snapPesos.despachoPorFila) && snapPesos.despachoPorFila.length)
+            || snapPesos.despachoAcopio != null;
+        const cards = Array.isArray(estado?.packingCards) ? estado.packingCards : [];
+        cards.forEach((card) => {
+            const p = card.pesos || pesosVaciosPacking();
+            const faltantes = Object.keys(pesoLabels).filter((k) => pesoNumero(p[k]) <= 0);
+            if (faltantes.length) {
+                errores.push(
+                    msgErrorPesosPacking(
+                        card.clamshellNum,
+                        'Completa ' + faltantes.map((k) => pesoLabels[k]).join(', ') + '.'
+                    )
+                );
+                return;
+            }
+            const limite = tieneDespachoSnap
+                ? getLimitePesoRecepcionPacking(card.clamshellNum, snapPesos)
+                : null;
+            const pesoErr = validarSecuenciaPesosPacking(p, limite);
+            if (pesoErr.length) {
+                errores.push(msgErrorPesosPacking(card.clamshellNum, pesoErr[0]));
+            }
+        });
+
+        return { ok: errores.length === 0, errores };
+    }
+
+    function muestraPackingEstadoCompleto_(estado, quotaSnap) {
+        if (!estado || !hayDatosTrabajoMuestraPacking(estado)) return false;
+        if (restantesDesdeEstadoMuestraPacking(estado, quotaSnap) > 0) return false;
+        return validarCompletitudPackingParaEnvioDesdeEstado_(estado, quotaSnap).ok;
+    }
+
+    function muestraPackingCompletaEnPantalla_() {
+        if (!muestraSeleccionada()) return false;
+        return muestraPackingEstadoCompleto_(capturarEstadoMuestraPacking(), { ...packingQuota });
+    }
+
+    function capturaEstadoMuestraParaValidacion_(rawMuestra) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const raw = String(rawMuestra || '').trim();
+        if (!fecha || !raw) return null;
+        const parts = raw.split('|');
+        const key = claveBorradorMuestraPacking(fecha, raw);
+        const borrador = key ? leerStoreBorradorPacking().porClave[key] : null;
+        if (raw === String(elMuestra?.value || '').trim()) {
+            const estadoLive = capturarEstadoMuestraPacking();
+            const quotaLive = { ...packingQuota };
+            const snapBorrador = borrador?.packingQuotaSnapshot || quotaLive;
+            const liveCompleto = muestraPackingEstadoCompleto_(estadoLive, quotaLive);
+            const borradorCompleto = borrador
+                && muestraPackingEstadoCompleto_(borrador, snapBorrador);
+            const usarBorrador = borradorCompleto && (!liveCompleto || !packingCards.length);
+            const estado = usarBorrador ? borrador : estadoLive;
+            const quotaSnap = usarBorrador ? snapBorrador : quotaLive;
+            return {
+                raw,
+                num_muestra: parts[0] || '',
+                ensayo_numero: parts[1] || '',
+                estado,
+                quotaSnap
+            };
+        }
+        if (!borrador) return null;
+        return {
+            raw,
+            num_muestra: parts[0] || '',
+            ensayo_numero: parts[1] || '',
+            estado: borrador,
+            quotaSnap: borrador.packingQuotaSnapshot || {}
+        };
+    }
+
+    function leerBorradorMuestraPacking_(fechaIso, rawMuestra) {
+        const key = claveBorradorMuestraPacking(fechaIso, rawMuestra);
+        if (!key) return null;
+        return leerStoreBorradorPacking().porClave[key] || null;
+    }
+
+    function capturaEstadoMuestraParaEnvio_(rawMuestra) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const raw = String(rawMuestra || '').trim();
+        if (!fecha || !raw) return null;
+        const parts = raw.split('|');
+
+        if (raw === String(elMuestra?.value || '').trim()) {
+            const estado = capturarEstadoMuestraPacking();
+            if (hayDatosTrabajoMuestraPacking(estado)) {
+                return {
+                    raw,
+                    num_muestra: parts[0] || '',
+                    ensayo_numero: parts[1] || '',
+                    estado,
+                    quotaSnap: capturarQuotaSnapshotPacking_()
+                };
+            }
+        }
+
+        const borrador = leerBorradorMuestraPacking_(fecha, raw);
+        if (borrador && hayDatosTrabajoMuestraPacking(borrador)) {
+            return {
+                raw,
+                num_muestra: parts[0] || '',
+                ensayo_numero: parts[1] || '',
+                estado: borrador,
+                quotaSnap: borrador.packingQuotaSnapshot || {}
+            };
+        }
+
+        return capturaEstadoMuestraParaValidacion_(raw);
+    }
+
+    async function asegurarCapturaEnvioPacking_(rawMuestra) {
+        let cap = capturaEstadoMuestraParaEnvio_(rawMuestra);
+        if (cap && hayDatosTrabajoMuestraPacking(cap.estado)) return cap;
+        const raw = String(rawMuestra || '').trim();
+        if (!raw || raw === String(elMuestra?.value || '').trim()) return cap;
+        await cargarMuestraPackingParaEnvio_(raw);
+        cap = capturaEstadoMuestraParaEnvio_(raw);
+        if (cap && hayDatosTrabajoMuestraPacking(cap.estado)) return cap;
+        return null;
+    }
+
+    function asegurarBorradoresAntesEnvioPacking_(lista) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        if (!fecha) return;
+        guardarBorradorMuestraActivaInmediato_();
+        const store = leerStoreBorradorPacking();
+        const raws = new Set((lista || []).map((item) => String(item?.raw || '').trim()).filter(Boolean));
+        obtenerOpcionesMuestraPackingSelect_().forEach((raw) => raws.add(raw));
+        raws.forEach((raw) => {
+            const cap = capturaEstadoMuestraParaEnvio_(raw);
+            if (!cap || !hayDatosTrabajoMuestraPacking(cap.estado)) return;
+            const key = claveBorradorMuestraPacking(fecha, raw);
+            if (key) store.porClave[key] = cap.estado;
+        });
+        const rawActivo = String(elMuestra?.value || '').trim();
+        if (rawActivo) {
+            const keyActiva = claveBorradorMuestraPacking(fecha, rawActivo);
+            if (keyActiva) store.activa = keyActiva;
+        }
+        escribirStoreBorradorPacking(store);
+    }
+
+    function itemMuestraPackingParaLista_(raw, numMuestra, ensayoNumero) {
+        return {
+            raw,
+            num_muestra: numMuestra,
+            ensayo_numero: ensayoNumero,
+            etiqueta: textoSelectMuestra(numMuestra, ensayoNumero)
+        };
+    }
+
+    function obtenerOpcionesMuestraPackingSelect_() {
+        if (!elMuestra) return [];
+        return Array.from(elMuestra.options)
+            .map((opt) => String(opt.value || '').trim())
+            .filter((v) => v && v.includes('|'));
+    }
+
+    function muestraPackingCuotaLlena_(estado, quotaSnap) {
+        const snap = quotaSnap && typeof quotaSnap === 'object' ? quotaSnap : {};
+        const max = cuotaMaximaDesdeSnapshotPacking(snap);
+        const enSrv = Number(snap.filasPackingRegistradas) || 0;
+        const cards = Array.isArray(estado?.packingCards) ? estado.packingCards.length : 0;
+        if (max <= 0) return cards > 0;
+        return enSrv + cards >= max;
+    }
+
+    function muestraPackingListaParaModal_(rawMuestra) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const raw = String(rawMuestra || '').trim();
+        if (!fecha || !raw) return null;
+        const parts = raw.split('|');
+        const numMuestra = parts[0] || '';
+        const ensayoNumero = parts[1] || '';
+        if (!ensayoNumero) return null;
+
+        if (raw === String(elMuestra?.value || '').trim()) {
+            const estado = capturarEstadoMuestraPacking();
+            const snap = capturarQuotaSnapshotPacking_();
+            if (!hayDatosTrabajoMuestraPacking(estado)) return null;
+            if (restantesPorAgregarPacking() !== 0 && !muestraPackingCuotaLlena_(estado, snap)) return null;
+            return itemMuestraPackingParaLista_(raw, numMuestra, ensayoNumero);
+        }
+
+        const key = claveBorradorMuestraPacking(fecha, raw);
+        const borrador = key ? leerStoreBorradorPacking().porClave[key] : null;
+        if (!borrador || !hayDatosTrabajoMuestraPacking(borrador)) return null;
+        const snap = borrador.packingQuotaSnapshot || {};
+        const rest = restantesDesdeEstadoMuestraPacking(borrador, snap);
+        if (rest !== 0 && !muestraPackingCuotaLlena_(borrador, snap)) return null;
+        return itemMuestraPackingParaLista_(raw, numMuestra, ensayoNumero);
+    }
+
+    function obtenerMuestrasListasModalEnvioPacking_() {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        if (!fecha) return [];
+        const vistos = new Set();
+        const out = [];
+        recogerCandidatosMuestrasPackingDelDia_(fecha).forEach((raw) => {
+            if (!raw || vistos.has(raw)) return;
+            vistos.add(raw);
+            const item = muestraPackingListaParaModal_(raw);
+            if (item) out.push(item);
+        });
+        return ordenarMuestrasPackingPorEnsayo_(out);
+    }
+
+    function persistirBorradoresContadorCeroPacking_(fechaIso) {
+        const fecha = normalizarFechaIso(fechaIso || elFecha?.value);
+        if (!fecha) return;
+        const store = leerStoreBorradorPacking();
+        const rawActivo = String(elMuestra?.value || '').trim();
+
+        if (rawActivo) {
+            const estadoActivo = capturarEstadoMuestraPacking();
+            if (hayDatosTrabajoMuestraPacking(estadoActivo)) {
+                const keyActiva = claveBorradorMuestraPacking(fecha, rawActivo);
+                if (keyActiva) store.porClave[keyActiva] = estadoActivo;
+            }
+        }
+
+        recogerCandidatosMuestrasPackingDelDia_(fecha).forEach((raw) => {
+            if (!raw || raw === rawActivo) return;
+            const borrador = leerBorradorMuestraPacking_(fecha, raw);
+            if (borrador && hayDatosTrabajoMuestraPacking(borrador)) {
+                const key = claveBorradorMuestraPacking(fecha, raw);
+                if (key) store.porClave[key] = borrador;
+                return;
+            }
+            const cap = capturaEstadoMuestraParaEnvio_(raw);
+            if (!cap || !hayDatosTrabajoMuestraPacking(cap.estado)) return;
+            const key = claveBorradorMuestraPacking(fecha, raw);
+            if (key) store.porClave[key] = cap.estado;
+        });
+
+        if (rawActivo) {
+            const keyActiva = claveBorradorMuestraPacking(fecha, rawActivo);
+            if (keyActiva) store.activa = keyActiva;
+        }
+        escribirStoreBorradorPacking(store);
+    }
+
+    function resumenMuestraPackingDelDia_(rawMuestra) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const raw = String(rawMuestra || '').trim();
+        if (!fecha || !raw) return null;
+        const parts = raw.split('|');
+        const numMuestra = parts[0] || '';
+        const ensayoNumero = parts[1] || '';
+        const etiqueta = textoSelectMuestra(numMuestra, ensayoNumero);
+        const base = { raw, num_muestra: numMuestra, ensayo_numero: ensayoNumero, etiqueta };
+
+        if (muestraPackingListaParaModal_(raw)) {
+            return Object.assign(base, { estado: 'lista', restantes: 0 });
+        }
+
+        if (raw === String(elMuestra?.value || '').trim()) {
+            const estado = capturarEstadoMuestraPacking();
+            if (!hayDatosTrabajoMuestraPacking(estado)) {
+                return Object.assign(base, { estado: 'sin_datos', restantes: null });
+            }
+            const rest = restantesPorAgregarPacking();
+            return Object.assign(base, {
+                estado: rest === 0 ? 'lista' : 'incompleta',
+                restantes: rest
+            });
+        }
+
+        const borrador = leerBorradorMuestraPacking_(fecha, raw);
+        if (!borrador || !hayDatosTrabajoMuestraPacking(borrador)) {
+            return Object.assign(base, { estado: 'sin_datos', restantes: null });
+        }
+        const snap = borrador.packingQuotaSnapshot || {};
+        const rest = restantesDesdeEstadoMuestraPacking(borrador, snap);
+        const lista = rest === 0 || muestraPackingCuotaLlena_(borrador, snap);
+        return Object.assign(base, {
+            estado: lista ? 'lista' : 'incompleta',
+            restantes: rest
+        });
+    }
+
+    function analizarMuestrasPackingDelDia_() {
+        const opciones = obtenerOpcionesMuestraPackingSelect_();
+        const resumenes = opciones.map((raw) => resumenMuestraPackingDelDia_(raw)).filter(Boolean);
+        const listas = resumenes
+            .filter((r) => r.estado === 'lista')
+            .map((r) => itemMuestraPackingParaLista_(r.raw, r.num_muestra, r.ensayo_numero));
+        const incompletas = resumenes.filter((r) => r.estado === 'incompleta');
+        const sinDatos = resumenes.filter((r) => r.estado === 'sin_datos');
+        const pendientes = incompletas.concat(sinDatos);
+        const numerosDia = opciones
+            .map((raw) => numeroEnsayoPackingDesdeRaw(raw))
+            .filter((n) => n > 0)
+            .sort((a, b) => a - b);
+        const numerosListas = listas
+            .map((item) => numeroEnsayoPackingDesdeRaw(item.raw))
+            .filter((n) => n > 0);
+        const huecosEntreListas = detectarHuecosSecuenciaPacking_(listas).huecos;
+        const huecosEnDia = [];
+        if (numerosDia.length) {
+            const min = numerosDia[0];
+            const max = numerosDia[numerosDia.length - 1];
+            for (let n = min; n <= max; n++) {
+                const enDia = numerosDia.includes(n);
+                const listaOk = numerosListas.includes(n);
+                if (enDia && !listaOk) huecosEnDia.push(n);
+            }
+        }
+        return {
+            opciones,
+            resumenes,
+            listas: ordenarMuestrasPackingPorEnsayo_(listas),
+            incompletas,
+            sinDatos,
+            pendientes,
+            huecosEntreListas,
+            huecosEnDia
+        };
+    }
+
+    function textoPendienteMuestraPacking_(r) {
+        const etiqueta = r.etiqueta || textoSelectMuestra(r.num_muestra, r.ensayo_numero);
+        if (r.estado === 'sin_datos') {
+            return '<li><b>' + etiqueta + '</b> — sin datos de packing</li>';
+        }
+        const rest = Number(r.restantes);
+        const det = Number.isFinite(rest) && rest > 0
+            ? ('faltan <b>' + rest + '</b> clamshell(s) · contador debe estar en <b>0</b>')
+            : 'contador debe estar en <b>0</b>';
+        return '<li><b>' + etiqueta + '</b> — ' + det + '</li>';
+    }
+
+    async function confirmarContinuarEnvioConPendientesPacking_(analisis) {
+        const pendientes = analisis?.pendientes || [];
+        if (!pendientes.length) return true;
+
+        const listas = analisis.listas || [];
+        const htmlPend = '<ul style="margin:8px 0 0;padding-left:18px;text-align:left;font-size:13px;color:#475569;">'
+            + pendientes.map((r) => textoPendienteMuestraPacking_(r)).join('')
+            + '</ul>';
+        const htmlListas = listas.length
+            ? '<p style="margin:12px 0 0;font-size:13px;color:#64748b;">Listas para enviar (contador en 0): <b>'
+                + listas.map((x) => x.etiqueta || x.ensayo_numero).join(', ')
+                + '</b></p>'
+            : '';
+        const html = '<p style="margin:0;font-size:13px;color:#475569;">Hay muestras del día que <b>no están completas</b> '
+            + '(el badge del + debe estar en <b>0 verde</b>, no en número como 7):</p>'
+            + htmlPend
+            + htmlListas
+            + '<p style="margin:12px 0 0;font-size:13px;color:#64748b;">Completa esos datos o continúa solo con las muestras listas.</p>';
+
+        if (window.Swal && typeof window.Swal.fire === 'function') {
+            const r = await swalFirePacking({
+                icon: 'warning',
+                title: 'Muestras incompletas',
+                html: html,
+                showCancelButton: true,
+                cancelButtonText: 'Completar datos',
+                confirmButtonText: listas.length ? 'Continuar a enviar' : 'Entendido',
+                allowOutsideClick: false
+            });
+            if (!listas.length) return false;
+            return !!(r && r.isConfirmed);
+        }
+        if (!listas.length) {
+            mostrarToastPacking(
+                'warning',
+                'Muestras incompletas',
+                'Completa todas las muestras (contador en 0) antes de enviar.'
+            );
+            return false;
+        }
+        return true;
+    }
+
+    function resolverCandidatasModalEnvioPacking_(completas) {
+        const analisis = analizarMuestrasPackingDelDia_();
+        const listasModal = analisis.listas.length
+            ? analisis.listas
+            : obtenerMuestrasListasModalEnvioPacking_();
+        return unirMuestrasPackingParaEnvio_([completas, listasModal]);
+    }
+
+    function unirMuestrasPackingParaEnvio_(listas) {
+        const map = new Map();
+        (listas || []).forEach((lista) => {
+            (lista || []).forEach((item) => {
+                if (item?.raw) map.set(item.raw, item);
+            });
+        });
+        return ordenarMuestrasPackingPorEnsayo_(Array.from(map.values()));
+    }
+
+    function obtenerMuestrasCompletasPackingParaEnvio_() {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        if (!fecha) return [];
+        const candidatos = recogerCandidatosMuestrasPackingDelDia_(fecha);
+
+        const vistos = new Set();
+        const out = [];
+        candidatos.forEach((raw) => {
+            if (!raw || vistos.has(raw)) return;
+            vistos.add(raw);
+            const cap = capturaEstadoMuestraParaValidacion_(raw);
+            if (!cap || !muestraPackingEstadoCompleto_(cap.estado, cap.quotaSnap)) return;
+            out.push(itemMuestraPackingParaLista_(cap.raw, cap.num_muestra, cap.ensayo_numero));
+        });
+        return ordenarMuestrasPackingPorEnsayo_(out);
+    }
+
+    function persistirBorradoresCompletasPacking_(fechaIso) {
+        const fecha = normalizarFechaIso(fechaIso);
+        if (!fecha) return;
+        const store = leerStoreBorradorPacking();
+        const rawActivo = String(elMuestra?.value || '').trim();
+        const candidatos = recogerCandidatosMuestrasPackingDelDia_(fecha);
+        const paraPersistir = [];
+        candidatos.forEach((raw) => {
+            const cap = capturaEstadoMuestraParaValidacion_(raw);
+            if (!cap || !muestraPackingEstadoCompleto_(cap.estado, cap.quotaSnap)) return;
+            paraPersistir.push(cap);
+        });
+        ordenarMuestrasPackingPorEnsayo_(paraPersistir.map((cap) => ({
+            raw: cap.raw,
+            num_muestra: cap.num_muestra,
+            ensayo_numero: cap.ensayo_numero
+        }))).reverse().forEach((item) => {
+            const cap = capturaEstadoMuestraParaValidacion_(item.raw);
+            if (!cap || !hayDatosTrabajoMuestraPacking(cap.estado)) return;
+            const key = claveBorradorMuestraPacking(fecha, item.raw);
+            if (key) store.porClave[key] = cap.estado;
+        });
+        if (rawActivo) {
+            const keyActiva = claveBorradorMuestraPacking(fecha, rawActivo);
+            if (keyActiva) store.activa = keyActiva;
+        }
+        escribirStoreBorradorPacking(store);
+    }
+
+    function prepararDeteccionEnvioPacking_() {
+        guardarBorradorMuestraActivaInmediato_();
+        persistirBorradoresContadorCeroPacking_(elFecha?.value);
+        persistirBorradoresCompletasPacking_(elFecha?.value);
+        return obtenerMuestrasCompletasPackingParaEnvio_();
+    }
+
+    function puedeRefrescarFechaPacking_() {
+        if (envioPackingEnCurso) return false;
+        if (document.querySelector('.swal2-container')) return false;
+        return true;
+    }
+
+    function restaurarEstadoCompletoDesdeBorradorActivo_() {
+        if (!muestraSeleccionada() || packingCards.length) return false;
+        const key = claveBorradorMuestraPacking(elFecha?.value, elMuestra?.value);
+        const borrador = key ? leerStoreBorradorPacking().porClave[key] : null;
+        const snap = borrador?.packingQuotaSnapshot || { ...packingQuota };
+        if (!borrador || !muestraPackingEstadoCompleto_(borrador, snap)) return false;
+        aplicarEstadoMuestraPacking(borrador, { skipPreview: true });
+        return packingCards.length > 0;
+    }
+
+    async function cargarMuestraPackingParaEnvio_(rawMuestra) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const raw = String(rawMuestra || '').trim();
+        const parts = raw.split('|');
+        const ensayoNumero = parts[1] || '';
+        if (!fecha || !raw || !ensayoNumero) return false;
+        const prev = String(elMuestra?.value || '').trim();
+        cancelarGuardadoBorradorProgramadoPacking_();
+        if (prev && prev !== raw) {
+            const estadoUi = capturarEstadoMuestraPacking();
+            snapshotMuestraPackingSiHayTrabajo(fecha, prev, estadoUi);
+        }
+        packingRestaurandoBorrador = true;
+        if (elMuestra) elMuestra.value = raw;
+        packingMuestraAnterior = raw;
+        packingRestaurandoBorrador = false;
+        const key = claveBorradorMuestraPacking(fecha, raw);
+        const store = leerStoreBorradorPacking();
+        store.activa = key;
+        escribirStoreBorradorPacking(store);
+        const borrador = key ? store.porClave[key] : null;
+        if (borrador && hayDatosTrabajoMuestraPacking(borrador)) {
+            aplicarEstadoMuestraPacking(borrador, { skipPreview: true });
+        }
+        await cargarDetalle(fecha, ensayoNumero);
+        actualizarFabRestanteBadge();
+        return true;
+    }
+
+    async function seleccionarMuestraPackingParaEnviar_(preferida, completas, analisis) {
+        const lista = ordenarMuestrasPackingPorEnsayo_(completas || []);
+        if (!lista.length) return null;
+        const info = analisis || analizarMuestrasPackingDelDia_();
+        const { huecos } = detectarHuecosSecuenciaPacking_(lista);
+        const huecosDia = info.huecosEnDia || [];
+        const secuenciaContinua = huecos.length === 0 && huecosDia.length === 0;
+        if (lista.length === 1) return { modo: 'una', raw: lista[0].raw };
+
+        const opts = {};
+        lista.forEach((item) => {
+            opts[item.raw] = (item.etiqueta || textoSelectMuestra(item.num_muestra, item.ensayo_numero))
+                + ' · contador 0';
+        });
+        const pref = lista.find((x) => x.raw === preferida)?.raw || lista[lista.length - 1].raw;
+
+        let htmlSecuencia = '<p style="margin:0 0 10px;font-size:13px;color:#64748b;">'
+            + 'Solo aparecen muestras con contador en <b>0</b> (badge verde en el botón +).</p>';
+        if (secuenciaContinua) {
+            htmlSecuencia += '<p style="margin:0 0 10px;font-size:13px;color:#64748b;">'
+                + 'Puedes enviar una o todas juntas en orden.</p>';
+        } else {
+            const faltan = huecosDia.length ? huecosDia : huecos;
+            htmlSecuencia += '<p style="margin:0 0 10px;font-size:13px;color:#b45309;">'
+                + '<b>Hay hueco en la secuencia</b> (muestra ' + faltan.join(', ')
+                + ' sin contador en 0). Completa esos datos o envía <b>una muestra</b> a la vez.</p>';
+        }
+        if (info.pendientes?.length) {
+            htmlSecuencia += '<p style="margin:0 0 6px;font-size:12px;color:#94a3b8;">No listadas (incompletas): '
+                + info.pendientes.map((r) => r.etiqueta || r.ensayo_numero).join(', ')
+                + '</p>';
+        }
+
+        if (window.Swal && typeof window.Swal.fire === 'function') {
+            const r = await swalFirePacking({
+                icon: 'question',
+                title: 'Packing listo para enviar',
+                html: htmlSecuencia,
+                input: 'select',
+                inputOptions: opts,
+                inputValue: pref,
+                confirmButtonText: 'Enviar muestra',
+                showDenyButton: secuenciaContinua,
+                denyButtonText: 'Enviar muestras juntas',
+                showCancelButton: true,
+                cancelButtonText: 'Cancelar',
+                denyButtonColor: '#1f4f82',
+                allowOutsideClick: false
+            });
+            if (r.isDenied && secuenciaContinua) return { modo: 'todas', lista };
+            if (!r.isConfirmed) return null;
+            return { modo: 'una', raw: String(r.value || '').trim() || pref };
+        }
+        return { modo: 'una', raw: pref };
+    }
+
     function slotsDisponiblesEnServidorPacking() {
         const max = cuotaMaximaEfectivaPacking();
         return Math.max(0, max - packingQuota.filasPackingRegistradas);
@@ -494,19 +1321,33 @@
         const rest = restantesPorAgregarPacking();
         const max = cuotaMaximaEfectivaPacking();
         const hayMuestra = muestraSeleccionada();
-        const badgeVal = hayMuestra ? rest : 0;
+        const hayTrabajo = hayMuestra && hayDatosTrabajoMuestraPacking(capturarEstadoMuestraPacking());
+        const completa = hayTrabajo && rest === 0 && muestraPackingCompletaEnPantalla_();
+        if (completa && !packingBadgeWasComplete) {
+            guardarBorradorMuestraActivaInmediato_();
+        }
+        packingBadgeWasComplete = completa;
 
         if (elFabRestanteBadge) {
-            elFabRestanteBadge.textContent = String(badgeVal);
-            elFabRestanteBadge.removeAttribute('aria-hidden');
+            if (!hayMuestra) {
+                elFabRestanteBadge.setAttribute('aria-hidden', 'true');
+                elFabRestanteBadge.classList.remove('is-complete', 'is-pending');
+            } else {
+                elFabRestanteBadge.removeAttribute('aria-hidden');
+                elFabRestanteBadge.textContent = String(rest);
+                elFabRestanteBadge.classList.toggle('is-complete', completa);
+                elFabRestanteBadge.classList.toggle('is-pending', !completa && rest > 0);
+            }
         }
         if (elFabAgregar) {
             elFabAgregar.disabled = false;
             elFabAgregar.title = !hayMuestra
                 ? 'Seleccionar muestra para continuar por favor'
-                : (rest > 0
-                    ? ('Agregar clamshell · faltan ' + rest + ' de ' + max)
-                    : ('Límite packing · ' + packingQuota.filasPackingRegistradas + '/' + max));
+                : (completa
+                    ? ('Muestra completa · ' + packingQuota.filasPackingRegistradas + '/' + max + ' clamshells')
+                    : (rest > 0
+                        ? ('Agregar clamshell · faltan ' + rest + ' de ' + max)
+                        : ('Límite packing · ' + packingQuota.filasPackingRegistradas + '/' + max)));
         }
     }
 
@@ -693,21 +1534,17 @@
         const card = getCardPackingById(cardId);
         if (!card) return;
         const mensaje = 'Se eliminará Clamshell #' + card.clamshellNum + ' de esta muestra. ¿Deseas continuar?';
-        let confirmado = false;
-        if (window.Swal && typeof window.Swal.fire === 'function') {
-            const resp = await swalFirePacking({
-                icon: 'warning',
-                title: 'Confirmar eliminación',
-                text: mensaje,
-                showCancelButton: true,
-                confirmButtonText: 'Sí, eliminar',
-                cancelButtonText: 'No',
-                reverseButtons: true
-            });
-            confirmado = !!(resp && resp.isConfirmed);
-        } else {
-            confirmado = window.confirm(mensaje);
-        }
+        const confirmado = await confirmarSwalPacking_({
+            icon: 'warning',
+            title: 'Confirmar eliminación',
+            text: mensaje,
+            showCancelButton: true,
+            confirmButtonText: 'Sí, eliminar',
+            cancelButtonText: 'No',
+            confirmButtonColor: '#D92D20',
+            reverseButtons: true,
+            allowOutsideClick: false
+        });
         if (!confirmado) return;
         packingCards = packingCards.filter((c) => c.id !== cardId);
         packingCards.forEach((c, i) => {
@@ -1078,6 +1915,19 @@
         packingControlState.presionFruta = ['', '', '', '', ''];
     }
 
+    /** Limpia tiempos/control/hora al cambiar de muestra sin borrador (evita arrastrar demo de otra). */
+    function limpiarUiCapturaMuestraPacking_() {
+        packingBadgeWasComplete = false;
+        resetControlGlobalPacking();
+        TIEMPOS_MUESTRA_IDS.forEach((id) => {
+            const inp = document.getElementById(id);
+            if (inp) inp.value = '';
+        });
+        if (elHoraInicio) elHoraInicio.value = '';
+        actualizarContadoresTiempo();
+        actualizarContadoresPresionPacking();
+    }
+
     function leerStoreBorradorPacking() {
         try {
             const raw = localStorage.getItem(PACKING_DRAFT_STORAGE_KEY);
@@ -1086,7 +1936,8 @@
             if (!o || typeof o !== 'object') return { version: 1, porClave: {}, activa: '' };
             if (!o.porClave || typeof o.porClave !== 'object') o.porClave = {};
             return o;
-        } catch (_) {
+        } catch (err) {
+            console.error('[Packing] Error leyendo borrador local:', err);
             return { version: 1, porClave: {}, activa: '' };
         }
     }
@@ -1105,7 +1956,9 @@
                 activa: String(store?.activa || ''),
                 porClave
             }));
-        } catch (_) { /* ignore */ }
+        } catch (err) {
+            console.error('[Packing] Error guardando borrador local:', err);
+        }
     }
 
     function claveBorradorMuestraPacking(fecha, rawMuestra) {
@@ -1155,7 +2008,7 @@
             tiempos: getTiemposMuestra(),
             horaInicio: getHoraPersonal(),
             responsable: getResponsablePacking(),
-            packingQuotaSnapshot: { ...packingQuota },
+            packingQuotaSnapshot: capturarQuotaSnapshotPacking_(),
             previewMeta: capturarPreviewMetaPacking()
         };
     }
@@ -1205,18 +2058,26 @@
         }
     }
 
-    function normalizarCardsRestauradasPacking(cards) {
+    function normalizarCardsRestauradasPacking(cards, opts) {
         if (!Array.isArray(cards) || !cards.length) return null;
-        const disponibles = slotsDisponiblesEnServidorPacking();
+        const minSlots = Number(opts?.minSlots) || 0;
+        const desdeBorrador = !!opts?.desdeBorrador;
+        let disponibles = slotsDisponiblesEnServidorPacking();
+        if (desdeBorrador || minSlots > 0) {
+            disponibles = Math.max(disponibles, minSlots || cards.length, cards.length);
+        }
         if (disponibles <= 0) return null;
         const maxCards = Math.min(cards.length, disponibles);
         let seq = packingCardSeq;
         return cards.slice(0, maxCards).map((c, i) => {
             const id = Number.isFinite(Number(c.id)) ? Number(c.id) : ++seq;
             if (id > seq) seq = id;
+            const numGuardado = Number(c.clamshellNum);
             return {
                 id,
-                clamshellNum: packingQuota.filasPackingRegistradas + i + 1,
+                clamshellNum: (desdeBorrador && Number.isFinite(numGuardado) && numGuardado > 0)
+                    ? numGuardado
+                    : packingQuota.filasPackingRegistradas + i + 1,
                 pesos: { ...(c.pesos || pesosVaciosPacking()) },
                 observacion: String(c.observacion || '')
             };
@@ -1225,6 +2086,7 @@
 
     function aplicarEstadoMuestraPacking(estado, opts) {
         if (!estado || !hayDatosTrabajoMuestraPacking(estado)) {
+            limpiarUiCapturaMuestraPacking_();
             reiniciarCardsPacking();
             return;
         }
@@ -1251,7 +2113,13 @@
             elResponsable.value = String(estado.responsable).trim();
         }
         packingCardSeq = Number(estado.packingCardSeq) || 0;
-        const cards = normalizarCardsRestauradasPacking(estado.packingCards);
+        const snap = estado.packingQuotaSnapshot || {};
+        const cardsNeeded = Array.isArray(estado.packingCards) ? estado.packingCards.length : 0;
+        const restSnap = restantesDesdeEstadoMuestraPacking(estado, snap);
+        const cards = normalizarCardsRestauradasPacking(estado.packingCards, {
+            minSlots: cardsNeeded,
+            desdeBorrador: true
+        });
         if (cards && cards.length) {
             packingCards = cards;
             packingCardSeq = Math.max(packingCardSeq, ...cards.map((c) => c.id));
@@ -1265,6 +2133,7 @@
         }
         actualizarContadoresTiempo();
         actualizarContadoresPresionPacking();
+        actualizarFabRestanteBadge();
     }
 
     function borrarBorradorMuestraPacking(key) {
@@ -1276,6 +2145,7 @@
     }
 
     function snapshotMuestraPackingSiHayTrabajo(fecha, rawMuestra, estadoUi) {
+        if (packingOmitirAutoguardado) return;
         const key = claveBorradorMuestraPacking(fecha, rawMuestra);
         if (!key || !rawMuestra) return;
         const estado = estadoUi || capturarEstadoMuestraPacking();
@@ -1283,28 +2153,47 @@
         if (hayDatosTrabajoMuestraPacking(estado)) {
             store.porClave[key] = estado;
         } else {
-            delete store.porClave[key];
+            const existing = store.porClave[key];
+            if (!existing || !hayDatosTrabajoMuestraPacking(existing)) {
+                delete store.porClave[key];
+            }
         }
+        escribirStoreBorradorPacking(store);
+    }
+
+    function escribirBorradorMuestraPacking_(key, estado, opts) {
+        if (!key) return;
+        const store = leerStoreBorradorPacking();
+        const forzar = !!(opts && opts.forzar);
+        if (hayDatosTrabajoMuestraPacking(estado)) {
+            store.porClave[key] = estado;
+        } else if (forzar) {
+            delete store.porClave[key];
+        } else {
+            const existing = store.porClave[key];
+            if (!existing || !hayDatosTrabajoMuestraPacking(existing)) {
+                delete store.porClave[key];
+            }
+        }
+        if (opts?.activa !== false) store.activa = key;
         escribirStoreBorradorPacking(store);
     }
 
     function guardarBorradorMuestraActiva() {
-        if (packingRestaurandoBorrador || !muestraSeleccionada()) return;
+        if (packingOmitirAutoguardado || packingRestaurandoBorrador || !muestraSeleccionada()) return;
         const key = claveBorradorMuestraPacking(elFecha?.value, elMuestra?.value);
         if (!key) return;
-        const estado = capturarEstadoMuestraPacking();
-        const store = leerStoreBorradorPacking();
-        if (hayDatosTrabajoMuestraPacking(estado)) {
-            store.porClave[key] = estado;
-        } else {
-            delete store.porClave[key];
-        }
-        store.activa = key;
-        escribirStoreBorradorPacking(store);
+        escribirBorradorMuestraPacking_(key, capturarEstadoMuestraPacking());
+    }
+
+    function cancelarGuardadoBorradorProgramadoPacking_() {
+        clearTimeout(packingDraftSaveTimer);
+        packingDraftSaveTimer = null;
     }
 
     function programarGuardadoBorradorPacking() {
-        clearTimeout(packingDraftSaveTimer);
+        if (packingOmitirAutoguardado || packingRestaurandoBorrador) return;
+        cancelarGuardadoBorradorProgramadoPacking_();
         packingDraftSaveTimer = setTimeout(guardarBorradorMuestraActiva, 220);
     }
 
@@ -1389,17 +2278,25 @@
         return pPulpa.toFixed(3);
     }
 
-    function recalcularPresionesPacking() {
-        const t = packingControlState.temperatura;
-        const h = packingControlState.humedad;
-        const pa = packingControlState.presionAmb;
-        const pf = packingControlState.presionFruta;
+    function recalcularPresionesDesdeControlPacking_(control) {
+        const cg = clonarControlStatePacking(control);
+        const t = cg.temperatura;
+        const h = cg.humedad;
+        const pa = cg.presionAmb;
+        const pf = cg.presionFruta;
         for (let i = 0; i < 5; i++) {
             const puedeAmb = controlGlobalPackingTieneDato(t.amb[i]) && controlGlobalPackingTieneDato(h[i]);
             const puedePulpa = controlGlobalPackingTieneDato(t.pulpa[i]);
             pa[i] = puedeAmb ? calcularPresionVaporAmbienteAshrae(t.amb[i], h[i]) : '';
             pf[i] = puedePulpa ? calcularPresionVaporPulpaAshrae(t.pulpa[i]) : '';
         }
+        return cg;
+    }
+
+    function recalcularPresionesPacking() {
+        const cg = recalcularPresionesDesdeControlPacking_(packingControlState);
+        packingControlState.presionAmb = cg.presionAmb;
+        packingControlState.presionFruta = cg.presionFruta;
     }
 
     function conteoPresionPacking(valores) {
@@ -1805,13 +2702,14 @@
         return hoyIsoLocal();
     }
 
-    function buildPackingRowDesdeCard(card) {
+    function buildPackingRowDesdeCard(card, horaRegistro) {
         const tiempos = getTiemposMuestra();
-        const row = new Array(36).fill('');
+        const row = new Array(PACKING_ROW_COLS).fill('');
         for (let i = 0; i < tiempos.length && i < 5; i++) row[i] = tiempos[i];
         aplicarPesosPackingARow(row, card.pesos);
         aplicarControlGlobalPackingARow(row);
-        row[35] = String(card.observacion || '').trim();
+        row[PACKING_ROW_IDX_OBS] = String(card.observacion || '').trim();
+        row[PACKING_ROW_IDX_HORA_REG] = String(horaRegistro || horaLocalActualPacking()).trim();
         return row;
     }
 
@@ -1819,6 +2717,7 @@
         const sel = ensayoSeleccionado();
         const hora = getHoraPersonal();
         const responsable = getResponsablePacking();
+        const horaRegistro = horaLocalActualPacking();
         // fecha (selector): ubica filas campo (col A + ensayo). fecha_inspeccion: col 47 (anillo = hoy).
         return {
             mode: 'packing',
@@ -1833,7 +2732,7 @@
             hora_recepcion: hora,
             hora_inicio_recepcion_c5: hora,
             packing_start_index: packingQuota.filasPackingRegistradas,
-            packingRows: packingCards.map((c) => buildPackingRowDesdeCard(c))
+            packingRows: packingCards.map((c) => buildPackingRowDesdeCard(c, horaRegistro))
         };
     }
 
@@ -2057,7 +2956,7 @@
         packingCards = [];
         renderizarCardsPacking();
         if (fecha && sel.ensayo_numero) {
-            await cargarDetalle(fecha, sel.ensayo_numero);
+            await cargarDetalle(fecha, sel.ensayo_numero, { sinOverlay: true });
         }
     }
 
@@ -2077,78 +2976,52 @@
         console.log('[SYNC] Resumen por fila:', resumenPackingParaLog_(body, cards));
     }
 
-    async function guardarRegistroYEnviarDesdePantallaPacking() {
-        if (envioPackingEnCurso) return;
-        if (!muestraSeleccionada()) {
-            setStatus('Selecciona una muestra antes de enviar.', 'warn');
-            return;
-        }
-        if (!packingCards.length) {
-            setStatus('Agrega al menos un clamshell.', 'warn');
-            return;
-        }
-        const cuotaReg = validarCuotaClamshellsRegistroPacking();
-        if (!cuotaReg.ok) {
-            setStatus(cuotaReg.error, 'warn');
-            if (elStatus) elStatus.dataset.pkCompletitudHint = '1';
-            mostrarToastPacking('warning', 'Clamshells incompletos', cuotaReg.error);
-            return;
-        }
-        const totalCampo = packingQuota.filasTotalCampo || totalFilasCampoPacking();
-        const inicio = packingQuota.filasPackingRegistradas;
-        if (totalCampo > 0 && inicio + packingCards.length > totalCampo) {
-            mostrarToastPacking(
-                'warning',
-                'Demasiados clamshells',
-                'Solo hay ' + totalCampo + ' fila(s) en campo; ya hay ' + inicio + ' con packing.'
-            );
-            return;
-        }
-        const validacion = validarCompletitudPackingParaEnvio();
-        if (!validacion.ok) {
-            const msg = validacion.errores[0] || 'Completa todos los datos de packing antes de enviar.';
-            setStatus(msg, 'warn');
-            if (elStatus) {
-                elStatus.dataset.pkCompletitudHint = '1';
+    async function ejecutarEnvioPackingBody_(body, sel, cards, opts) {
+        opts = opts || {};
+        const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
+            ? (sel.num_muestra + '|' + sel.ensayo_numero)
+            : (elMuestra?.value || '');
+
+        function limpiarTrasEnvioLocal_() {
+            const fecha = elFecha?.value || '';
+            limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
+            if (!opts.sinUi && String(elMuestra?.value || '').trim() === rawMuestra) {
+                packingCards = [];
+                renderizarCardsPacking();
+                actualizarFabRestanteBadge();
             }
-            mostrarToastPacking('warning', 'Datos incompletos', msg);
-            return;
         }
-        if (elStatus?.dataset.pkCompletitudHint) {
-            delete elStatus.dataset.pkCompletitudHint;
-        }
-        const sel = ensayoSeleccionado();
-        const body = getMetaEnvioPacking();
-        logEnvioPackingConsola(body, packingCards);
-        guardarBorradorMuestraActiva();
 
         if (!navigator.onLine) {
             const encolado = encolarPackingPendiente(body);
             if (encolado?.duplicado) {
-                mostrarToastPacking('info', 'Ya en cola', 'Este packing ya está pendiente de envío cuando vuelva internet.');
-                return;
+                if (!opts.sinToast) {
+                    mostrarToastPacking('info', 'Ya en cola', 'Este packing ya está pendiente de envío cuando vuelva internet.');
+                }
+                return false;
             }
             if (encolado) {
-                const fecha = elFecha?.value || '';
-                const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
-                    ? (sel.num_muestra + '|' + sel.ensayo_numero)
-                    : (elMuestra?.value || '');
-                limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
-                packingCards = [];
-                renderizarCardsPacking();
-                setStatus('');
-                if (elStatus) elStatus.hidden = true;
-                mostrarToastPacking(
-                    'warning',
-                    'Sin internet',
-                    'Quedó en cola y se enviará a la planilla al volver la conexión.'
-                );
+                limpiarTrasEnvioLocal_();
+                if (!opts.sinUi) {
+                    setStatus('');
+                    if (elStatus) elStatus.hidden = true;
+                }
+                if (!opts.sinToast) {
+                    mostrarToastPacking(
+                        'warning',
+                        'Sin internet',
+                        'Quedó en cola y se enviará a la planilla al volver la conexión.'
+                    );
+                }
+                return true;
             }
-            return;
+            return false;
         }
 
-        envioPackingEnCurso = true;
-        setButtonLoadingPacking(elBtnEnviarPacking, true, 'Enviando...');
+        if (!opts.sinLoading) {
+            envioPackingEnCurso = true;
+            setButtonLoadingPacking(elBtnEnviarPacking, true, 'Enviando...');
+        }
         try {
             await fetch(API_URL, {
                 method: 'POST',
@@ -2159,51 +3032,302 @@
             const regTmp = { payload: body };
             const confirmado = await confirmarPackingEnServidorTrasPost_(regTmp);
             if (confirmado) {
+                if (opts.sinUi) {
+                    limpiarTrasEnvioLocal_();
+                    return true;
+                }
+                if (!opts.sinLoading) {
+                    envioPackingEnCurso = false;
+                    setButtonLoadingPacking(elBtnEnviarPacking, false);
+                }
                 await aplicarExitoEnvioPacking_(sel);
-                return;
+                actualizarFabRestanteBadge();
+                return true;
             }
             const encolado = encolarPackingPendiente(body);
             if (encolado && !encolado.duplicado) {
-                const fecha = elFecha?.value || '';
-                const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
-                    ? (sel.num_muestra + '|' + sel.ensayo_numero)
-                    : (elMuestra?.value || '');
-                limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
-                packingCards = [];
-                renderizarCardsPacking();
+                limpiarTrasEnvioLocal_();
             }
-            mostrarToastPacking(
-                'info',
-                'En cola',
-                'POST enviado; si la planilla tarda en confirmar, se reintentará con internet.'
-            );
-            setStatus('');
-            if (elStatus) elStatus.hidden = true;
+            if (!opts.sinToast) {
+                mostrarToastPacking(
+                    'info',
+                    'En cola',
+                    'POST enviado; si la planilla tarda en confirmar, se reintentará con internet.'
+                );
+            }
+            if (!opts.sinUi) {
+                setStatus('');
+                if (elStatus) elStatus.hidden = true;
+            }
+            return true;
         } catch (err) {
             const encolado = encolarPackingPendiente(body);
             if (encolado && !encolado.duplicado) {
-                const fecha = elFecha?.value || '';
-                const rawMuestra = (sel.num_muestra && sel.ensayo_numero)
-                    ? (sel.num_muestra + '|' + sel.ensayo_numero)
-                    : (elMuestra?.value || '');
-                limpiarBorradorTrasEnvioExitosoPacking(fecha, rawMuestra);
-                packingCards = [];
-                renderizarCardsPacking();
-                mostrarToastPacking(
-                    'warning',
-                    'Conexión inestable',
-                    'Falló el envío directo; quedó en cola para reenviar con internet.'
-                );
-                setStatus('');
-                if (elStatus) elStatus.hidden = true;
-            } else {
+                limpiarTrasEnvioLocal_();
+                if (!opts.sinToast) {
+                    mostrarToastPacking(
+                        'warning',
+                        'Conexión inestable',
+                        'Falló el envío directo; quedó en cola para reenviar con internet.'
+                    );
+                }
+                if (!opts.sinUi) {
+                    setStatus('');
+                    if (elStatus) elStatus.hidden = true;
+                }
+                return true;
+            }
+            if (!opts.sinToast) {
                 setStatus(String(err.message || err), 'error');
                 mostrarToastPacking('error', 'Error', String(err.message || err));
+            }
+            return false;
+        } finally {
+            if (!opts.sinLoading) {
+                envioPackingEnCurso = false;
+                setButtonLoadingPacking(elBtnEnviarPacking, false);
+            }
+        }
+    }
+
+    async function enviarPackingDesdeCaptura_(cap, opts) {
+        if ((!opts?.sinLoading && envioPackingEnCurso) || !cap?.estado) return false;
+        const val = validarCompletitudPackingParaEnvioDesdeEstado_(cap.estado, cap.quotaSnap);
+        if (!val.ok) {
+            const msg = val.errores[0] || 'Completa todos los datos de packing antes de enviar.';
+            if (!opts?.sinToast) mostrarToastPacking('warning', 'Datos incompletos', msg);
+            return false;
+        }
+        const cuota = validarCuotaClamshellsDesdeEstado_(cap.estado, cap.quotaSnap);
+        if (!cuota.ok) {
+            if (!opts?.sinToast) mostrarToastPacking('warning', 'Clamshells incompletos', cuota.error);
+            return false;
+        }
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const body = getMetaEnvioPackingDesdeEstado_(cap.estado, cap.raw, fecha);
+        const cards = Array.isArray(cap.estado.packingCards) ? cap.estado.packingCards : [];
+        const sel = { num_muestra: cap.num_muestra, ensayo_numero: cap.ensayo_numero };
+        logEnvioPackingConsola(body, cards);
+        return ejecutarEnvioPackingBody_(body, sel, cards, opts);
+    }
+
+    async function refrescarMuestraPackingActivaTrasLote_(rawActivo, listaReferencia) {
+        const fecha = normalizarFechaIso(elFecha?.value);
+        const ordenRef = ordenarMuestrasPackingPorEnsayo_(listaReferencia || []);
+        const rawUltimoEnsayo = ordenRef.length ? ordenRef[ordenRef.length - 1].raw : '';
+        const raw = String(rawActivo || rawUltimoEnsayo || elMuestra?.value || '').trim();
+        if (!fecha || !raw) return;
+        const parts = raw.split('|');
+        const ensayoNumero = parts[1] || '';
+        if (!ensayoNumero) return;
+        if (String(elMuestra?.value || '').trim() !== raw) {
+            packingRestaurandoBorrador = true;
+            if (elMuestra) elMuestra.value = raw;
+            packingMuestraAnterior = raw;
+            packingRestaurandoBorrador = false;
+        }
+        const key = claveBorradorMuestraPacking(fecha, raw);
+        const borrador = key ? leerStoreBorradorPacking().porClave[key] : null;
+        if (borrador && hayDatosTrabajoMuestraPacking(borrador)) {
+            aplicarEstadoMuestraPacking(borrador, { skipPreview: true });
+        } else {
+            limpiarUiCapturaMuestraPacking_();
+            reiniciarCardsPacking();
+        }
+        await cargarDetalle(fecha, ensayoNumero);
+        actualizarFabRestanteBadge();
+    }
+
+    async function enviarPackingMuestraActual_() {
+        if (envioPackingEnCurso) return false;
+        if (!muestraSeleccionada()) {
+            setStatus('Selecciona una muestra antes de enviar.', 'warn');
+            return false;
+        }
+        if (!packingCards.length) {
+            restaurarEstadoCompletoDesdeBorradorActivo_();
+        }
+        if (!packingCards.length) {
+            setStatus('Agrega al menos un clamshell.', 'warn');
+            return false;
+        }
+        const cuotaReg = validarCuotaClamshellsRegistroPacking();
+        if (!cuotaReg.ok) {
+            setStatus(cuotaReg.error, 'warn');
+            if (elStatus) elStatus.dataset.pkCompletitudHint = '1';
+            mostrarToastPacking('warning', 'Clamshells incompletos', cuotaReg.error);
+            return false;
+        }
+        const totalCampo = packingQuota.filasTotalCampo || totalFilasCampoPacking();
+        const inicio = packingQuota.filasPackingRegistradas;
+        if (totalCampo > 0 && inicio + packingCards.length > totalCampo) {
+            mostrarToastPacking(
+                'warning',
+                'Demasiados clamshells',
+                'Solo hay ' + totalCampo + ' fila(s) en campo; ya hay ' + inicio + ' con packing.'
+            );
+            return false;
+        }
+        const validacion = validarCompletitudPackingParaEnvio();
+        if (!validacion.ok) {
+            const msg = validacion.errores[0] || 'Completa todos los datos de packing antes de enviar.';
+            setStatus(msg, 'warn');
+            if (elStatus) elStatus.dataset.pkCompletitudHint = '1';
+            mostrarToastPacking('warning', 'Datos incompletos', msg);
+            return false;
+        }
+        if (elStatus?.dataset.pkCompletitudHint) {
+            delete elStatus.dataset.pkCompletitudHint;
+        }
+        const sel = ensayoSeleccionado();
+        const body = getMetaEnvioPacking();
+        logEnvioPackingConsola(body, packingCards);
+        guardarBorradorMuestraActivaInmediato_();
+        return ejecutarEnvioPackingBody_(body, sel, packingCards);
+    }
+
+    async function enviarPackingMuestrasEnSecuencia_(lista) {
+        const ordenadasAsc = ordenarMuestrasPackingPorEnsayo_(lista || []);
+        const { huecos } = detectarHuecosSecuenciaPacking_(ordenadasAsc);
+        const analisisLote = analizarMuestrasPackingDelDia_();
+        const huecosDia = analisisLote.huecosEnDia || [];
+        const faltanSecuencia = huecosDia.length ? huecosDia : huecos;
+        if (faltanSecuencia.length) {
+            const pend = analisisLote.pendientes.find(
+                (r) => Number(r.ensayo_numero) === faltanSecuencia[0]
+            );
+            const etiqueta = pend?.etiqueta || ('muestra ' + faltanSecuencia[0]);
+            if (window.Swal && typeof window.Swal.fire === 'function') {
+                await swalFirePacking({
+                    icon: 'warning',
+                    title: 'No se puede enviar todas juntas',
+                    html: '<p style="margin:0;font-size:13px;color:#475569;">'
+                        + '<b>' + etiqueta + '</b> no tiene contador en <b>0</b> '
+                        + '(badge verde en el botón +). Completa sus datos antes de enviar la secuencia.</p>',
+                    confirmButtonText: 'Entendido',
+                    allowOutsideClick: false
+                });
+            } else {
+                mostrarToastPacking(
+                    'warning',
+                    'Secuencia incompleta',
+                    'Completa ' + etiqueta + ' (contador en 0) antes de enviar todas juntas.'
+                );
+            }
+            return false;
+        }
+        const rawActivo = String(elMuestra?.value || '').trim();
+        asegurarBorradoresAntesEnvioPacking_(lista);
+        persistirBorradoresContadorCeroPacking_(elFecha?.value);
+        persistirBorradoresCompletasPacking_(elFecha?.value);
+        const ordenadas = ordenadasAsc.slice().reverse();
+        const capturas = [];
+        for (const item of ordenadas) {
+            const cap = await asegurarCapturaEnvioPacking_(item.raw);
+            if (!cap || !hayDatosTrabajoMuestraPacking(cap.estado)) {
+                const etiqueta = item.etiqueta || textoSelectMuestra(item.num_muestra, item.ensayo_numero);
+                mostrarToastPacking(
+                    'warning',
+                    'Datos no disponibles',
+                    'No hay datos guardados para ' + (etiqueta || 'la muestra') + '. Ábrela, verifica el 0 verde y reintenta.'
+                );
+                await refrescarMuestraPackingActivaTrasLote_(rawActivo, ordenadasAsc);
+                return false;
+            }
+            capturas.push({ item, cap });
+        }
+
+        const optsLote = { sinUi: true, sinLoading: true, sinToast: true };
+        envioPackingEnCurso = true;
+        setButtonLoadingPacking(elBtnEnviarPacking, true, 'Enviando muestras...');
+        let enviados = 0;
+        try {
+            for (const { cap } of capturas) {
+                const ok = await enviarPackingDesdeCaptura_(cap, optsLote);
+                if (!ok) {
+                    if (enviados > 0) {
+                        mostrarToastPacking(
+                            'info',
+                            'Envío parcial',
+                            enviados + ' muestra(s) enviada(s); revisa la siguiente.'
+                        );
+                    }
+                    await refrescarMuestraPackingActivaTrasLote_(rawActivo, ordenadasAsc);
+                    return false;
+                }
+                enviados++;
             }
         } finally {
             envioPackingEnCurso = false;
             setButtonLoadingPacking(elBtnEnviarPacking, false);
         }
+
+        if (enviados > 0) {
+            await refrescarMuestraPackingActivaTrasLote_(rawActivo, ordenadasAsc);
+            const totalFilas = capturas.reduce(
+                (n, c) => n + (Array.isArray(c.cap.estado?.packingCards) ? c.cap.estado.packingCards.length : 0),
+                0
+            );
+            mostrarToastPacking(
+                'success',
+                'Muestras enviadas',
+                enviados + ' muestra(s) enviadas (' + totalFilas + ' filas). Te quedaste en la muestra activa.'
+            );
+        }
+        return enviados > 0;
+    }
+
+    async function guardarRegistroYEnviarDesdePantallaPacking() {
+        if (envioPackingEnCurso) return;
+
+        const completas = prepararDeteccionEnvioPacking_();
+        const analisis = analizarMuestrasPackingDelDia_();
+        const candidatas = resolverCandidatasModalEnvioPacking_(completas);
+        asegurarBorradoresAntesEnvioPacking_(candidatas);
+        const rawActivo = String(elMuestra?.value || '').trim();
+
+        if (analisis.opciones.length >= 2 && analisis.pendientes.length) {
+            const ok = await confirmarContinuarEnvioConPendientesPacking_(analisis);
+            if (!ok) return;
+        }
+
+        if (!candidatas.length) {
+            if (!muestraSeleccionada()) {
+                setStatus('Selecciona una muestra antes de enviar.', 'warn');
+                return;
+            }
+            await enviarPackingMuestraActual_();
+            return;
+        }
+
+        let plan = null;
+        if (candidatas.length >= 2) {
+            plan = await seleccionarMuestraPackingParaEnviar_(rawActivo, candidatas, analisis);
+        } else {
+            plan = { modo: 'una', raw: candidatas[0].raw };
+        }
+        if (!plan) return;
+
+        if (plan.modo === 'todas') {
+            await enviarPackingMuestrasEnSecuencia_(plan.lista);
+            return;
+        }
+
+        const raw = String(plan.raw || rawActivo).trim();
+        const cap = capturaEstadoMuestraParaValidacion_(raw);
+        if (cap && muestraPackingEstadoCompleto_(cap.estado, cap.quotaSnap)) {
+            if (raw !== rawActivo) {
+                const ok = await enviarPackingDesdeCaptura_(cap);
+                if (ok) await refrescarMuestraPackingActivaTrasLote_(rawActivo, candidatas);
+                return;
+            }
+            await enviarPackingMuestraActual_();
+            return;
+        }
+        if (raw && raw !== rawActivo) {
+            await cargarMuestraPackingParaEnvio_(raw);
+        }
+        await enviarPackingMuestraActual_();
     }
 
     let cargandoMuestrasSeq = 0;
@@ -2301,8 +3425,44 @@
 
     async function borrarTodoYCachePacking() {
         establecerMenuFlotantePacking(false);
-        const confirmado = window.confirm('Se borrarán datos locales, cola pendiente y caché. ¿Continuar?');
+        const confirmado = await confirmarSwalPacking_({
+            icon: 'warning',
+            title: 'Eliminar todo local',
+            html: '<p style="margin:0 0 8px;font-size:14px;line-height:1.45;">'
+                + 'Se borrará todo lo guardado en packing: borradores, clamshells, tiempos, control, cola pendiente e historial local.'
+                + '</p>'
+                + '<p style="margin:0;font-size:13px;color:#64748b;line-height:1.4;">'
+                + 'La app se recargará. Al elegir una muestra, trazabilidad y responsable pueden volver desde la planilla.'
+                + '</p>',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, borrar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#D92D20',
+            allowOutsideClick: false
+        });
         if (!confirmado) return;
+
+        packingOmitirAutoguardado = true;
+        clearTimeout(packingDraftSaveTimer);
+
+        try { localStorage.removeItem(PACKING_DRAFT_STORAGE_KEY); } catch (_) { /* ignore */ }
+        try { localStorage.removeItem(SYNC_QUEUE_KEY); } catch (_) { /* ignore */ }
+        try { localStorage.removeItem(SYNC_HISTORY_KEY); } catch (_) { /* ignore */ }
+        try { localStorage.removeItem(PACKING_CHIPS_COLLAPSED_KEY); } catch (_) { /* ignore */ }
+
+        packingCards = [];
+        packingActiveCardId = null;
+        lastDetallePacking = null;
+        limpiarUiCapturaMuestraPacking_();
+        if (elResponsable) elResponsable.value = '';
+        resetMuestraSelect('Seleccionar muestra', false);
+        setResumenVisible(false);
+        limpiarPreviewChips();
+        renderizarCardsPacking();
+        actualizarFabRestanteBadge();
+        actualizarBtnEnviarPacking();
+        actualizarHeaderPendientes();
+
         try {
             if (typeof caches !== 'undefined' && caches?.keys) {
                 const keys = await caches.keys();
@@ -2313,9 +3473,13 @@
                 await Promise.all(regs.map((r) => r.unregister()));
             }
         } catch (_) { /* ignore */ }
-        try { localStorage.removeItem(SYNC_QUEUE_KEY); } catch (_) { /* ignore */ }
-        try { localStorage.removeItem(PACKING_DRAFT_STORAGE_KEY); } catch (_) { /* ignore */ }
-        setTimeout(() => window.location.reload(), 350);
+
+        mostrarToastPacking('success', 'Limpieza completa', 'Recargando packing…');
+        setTimeout(() => {
+            try {
+                window.location.reload();
+            } catch (_) { /* ignore */ }
+        }, 450);
     }
 
     function sumarMinutosHoraPacking(hora, minutosAgregar) {
@@ -2378,27 +3542,81 @@
         };
     }
 
-    function llenarTiemposDemoPacking() {
+    function llenarTiemposDemoPacking(plantilla) {
+        const p = plantilla || PACKING_DEMO_PLANTILLA;
         initHoraInicio(true);
         const baseHora = getHoraPersonal() || '08:00';
-        const offsetsMin = [0, 60, 120, 180, 240];
+        const offsetsMin = Array.isArray(p.offsetsTiemposMin) ? p.offsetsTiemposMin : [];
         TIEMPOS_MUESTRA_IDS.forEach((id, i) => {
             const inp = document.getElementById(id);
             if (inp) inp.value = sumarMinutosHoraPacking(baseHora, offsetsMin[i] || 0);
         });
     }
 
-    function llenarControlEquitativoDemoPacking() {
-        packingControlState.temperatura.amb = ['12.5', '11.8', '11.2', '10.5', '10.0'];
-        packingControlState.temperatura.pulpa = ['11.0', '10.5', '10.0', '9.5', '9.0'];
-        packingControlState.humedad = ['85.0', '84.0', '83.0', '82.0', '81.0'];
+    function llenarControlEquitativoDemoPacking(plantilla) {
+        const p = plantilla || PACKING_DEMO_PLANTILLA;
+        packingControlState.temperatura.amb = (p.temperaturaAmb || []).slice(0, 5);
+        packingControlState.temperatura.pulpa = (p.temperaturaPulpa || []).slice(0, 5);
+        packingControlState.humedad = (p.humedad || []).slice(0, 5);
+        while (packingControlState.temperatura.amb.length < 5) packingControlState.temperatura.amb.push('');
+        while (packingControlState.temperatura.pulpa.length < 5) packingControlState.temperatura.pulpa.push('');
+        while (packingControlState.humedad.length < 5) packingControlState.humedad.push('');
         recalcularPresionesPacking();
+    }
+
+    function guardarBorradorMuestraActivaInmediato_() {
+        if (packingOmitirAutoguardado || packingRestaurandoBorrador || !muestraSeleccionada()) return '';
+        const key = claveBorradorMuestraPacking(elFecha?.value, elMuestra?.value);
+        if (!key) return '';
+        escribirBorradorMuestraPacking_(key, capturarEstadoMuestraPacking());
+        return key;
+    }
+
+    function aplicarDemoPackingEnMuestraActiva_(objetivoLocal, sel, plantilla) {
+        const p = plantilla || PACKING_DEMO_PLANTILLA;
+        const prefObs = String(p.observacionPrefijo || 'SIM-');
+
+        limpiarUiCapturaMuestraPacking_();
+        packingCards = [];
+        packingActiveCardId = null;
+        for (let i = 0; i < objetivoLocal; i++) {
+            const num = packingQuota.filasPackingRegistradas + i + 1;
+            const card = crearCardPacking(num);
+            card.pesos = pesosDemoParaClamshellPacking(num);
+            card.observacion = prefObs + num;
+            packingCards.push(card);
+        }
+        packingActiveCardId = packingCards[0]?.id ?? null;
+
+        if (elResponsable) {
+            elResponsable.value = String(p.responsable || 'Demo packing');
+        }
+
+        llenarTiemposDemoPacking(p);
+        llenarControlEquitativoDemoPacking(p);
+
+        renderizarCardsPacking();
+        actualizarContadoresTiempo();
+        actualizarContadoresPresionPacking();
+        actualizarFabRestanteBadge();
+        guardarBorradorMuestraActivaInmediato_();
+
+        return {
+            etiqueta: textoSelectMuestra(sel.num_muestra, sel.ensayo_numero),
+            ensayo: sel.ensayo_numero
+        };
     }
 
     function fabIniciarRegistroPacking() {
         establecerMenuFlotantePacking(false);
-        if (!muestraSeleccionada()) {
+        const rawMuestra = String(elMuestra?.value || '').trim();
+        if (!rawMuestra) {
             mostrarToastPacking('info', 'Seleccionar muestra', 'Selecciona una muestra antes de cargar datos de prueba.');
+            return;
+        }
+        const sel = ensayoSeleccionado();
+        if (!sel.ensayo_numero) {
+            mostrarToastPacking('info', 'Seleccionar muestra', 'Espera a que cargue la muestra en el selector.');
             return;
         }
         if (!lastDetallePacking) {
@@ -2410,43 +3628,23 @@
             mostrarToastPacking('warn', 'Sin filas', 'No hay filas de campo en el servidor para simular.');
             return;
         }
+        const maxEfectivo = cuotaMaximaEfectivaPacking();
+        const enServidor = packingQuota.filasPackingRegistradas;
         const objetivoLocal = Math.min(
-            totalServidor - packingQuota.filasPackingRegistradas,
+            maxEfectivo - enServidor,
+            totalServidor - enServidor,
             slotsDisponiblesEnServidorPacking()
         );
         if (objetivoLocal <= 0) {
             mostrarToastPacking(
                 'info',
                 'Packing completo',
-                'Todos los clamshells (' + totalServidor + ') ya están registrados en servidor.'
+                'Esta muestra ya tiene todos sus clamshells (' + totalServidor + ').'
             );
             return;
         }
 
-        packingCards = [];
-        packingActiveCardId = null;
-        for (let i = 0; i < objetivoLocal; i++) {
-            const num = packingQuota.filasPackingRegistradas + i + 1;
-            const card = crearCardPacking(num);
-            card.pesos = pesosDemoParaClamshellPacking(num);
-            card.observacion = 'SIM-' + num;
-            packingCards.push(card);
-        }
-        packingActiveCardId = packingCards[0]?.id ?? null;
-
-        if (elResponsable && !String(elResponsable.value || '').trim()) {
-            elResponsable.value = 'Demo packing';
-        }
-
-        llenarTiemposDemoPacking();
-        llenarControlEquitativoDemoPacking();
-
-        renderizarCardsPacking();
-        actualizarContadoresTiempo();
-        actualizarContadoresPresionPacking();
-        actualizarFabRestanteBadge();
-        programarGuardadoBorradorPacking();
-
+        const info = aplicarDemoPackingEnMuestraActiva_(objetivoLocal, sel, PACKING_DEMO_PLANTILLA);
         const validacionDemo = validarCompletitudPackingParaEnvio();
         if (!validacionDemo.ok) {
             setStatus(
@@ -2465,7 +3663,8 @@
             mostrarToastPacking(
                 'success',
                 'Datos de prueba',
-                'Simulados ' + objetivoLocal + ' clamshell(s) listos para enviar (cumplen reglas).'
+                info.etiqueta + ' (muestra ' + (info.ensayo || '—') + '): '
+                    + objetivoLocal + ' clamshell(s). Otras muestras no se modifican.'
             );
         }
 
@@ -2811,9 +4010,11 @@
         if (borrador && hayDatosTrabajoMuestraPacking(borrador)) {
             aplicarEstadoMuestraPacking(borrador, { skipPreview: true });
         } else {
+            limpiarUiCapturaMuestraPacking_();
             reiniciarCardsPacking();
         }
         setPackingCardHabilitada(muestraSeleccionada());
+        actualizarFabRestanteBadge();
         syncPackingFoldBtnAnchor();
     }
 
@@ -2826,11 +4027,26 @@
         limpiarPreview();
     }
 
-    function initFechaInput() {
-        if (!elFecha) return;
+    /** Siempre hoy: tope máximo = fecha actual; valor por defecto = hoy. */
+    function aplicarFechaHoyPacking_(opts) {
+        if (!elFecha) return false;
         const hoy = hoyIsoLocal();
-        if (!elFecha.value) elFecha.value = hoy;
+        const prev = elFecha.value;
         elFecha.max = hoy;
+        if (elFecha.min && elFecha.min > hoy) {
+            elFecha.removeAttribute('min');
+        }
+        const forzar = opts?.forzar !== false;
+        if (forzar || !prev || prev > hoy) {
+            elFecha.value = hoy;
+        } else if (prev < (elFecha.min || '')) {
+            elFecha.value = hoy;
+        }
+        return prev !== elFecha.value;
+    }
+
+    function initFechaInput() {
+        aplicarFechaHoyPacking_({ forzar: true });
     }
 
     async function acotarFechaDesdePlanilla() {
@@ -2839,16 +4055,22 @@
         try {
             await withMinLoader(async () => {
                 const r = await callbackJsonp({});
-                if (!r || r.ok !== true || !Array.isArray(r.fechas) || !r.fechas.length) return;
-                const fechas = r.fechas.filter(Boolean).sort();
-                elFecha.min = fechas[0];
-                elFecha.max = fechas[fechas.length - 1];
-                if (!elFecha.value || elFecha.value < elFecha.min || elFecha.value > elFecha.max) {
-                    elFecha.value = fechas[fechas.length - 1];
+                if (!r || r.ok !== true || !Array.isArray(r.fechas) || !r.fechas.length) {
+                    aplicarFechaHoyPacking_({ forzar: true });
+                    return;
                 }
+                const fechas = r.fechas.filter(Boolean).sort();
+                const hoy = hoyIsoLocal();
+                if (fechas[0] && fechas[0] <= hoy) {
+                    elFecha.min = fechas[0];
+                } else {
+                    elFecha.removeAttribute('min');
+                }
+                aplicarFechaHoyPacking_({ forzar: true });
             });
-        } catch (_) { /* ignore */ }
-        finally {
+        } catch (_) {
+            aplicarFechaHoyPacking_({ forzar: true });
+        } finally {
             setSelectLoading(false);
         }
     }
@@ -2914,10 +4136,14 @@
         }
     }
 
-    async function cargarDetalle(fechaIso, ensayoNumero) {
+    async function cargarDetalle(fechaIso, ensayoNumero, opts) {
         if (!fechaIso || !ensayoNumero) return;
+        const sinOverlay = !!(opts && opts.sinOverlay);
+        cancelarGuardadoBorradorProgramadoPacking_();
+        packingOmitirAutoguardado = true;
         const rawMuestra = String(elMuestra?.value || '').trim();
         const key = claveBorradorMuestraPacking(fechaIso, rawMuestra);
+        try {
         if (!navigator.onLine) {
             const borrador = key ? leerStoreBorradorPacking().porClave[key] : null;
             if (borrador && hayDatosTrabajoMuestraPacking(borrador)) {
@@ -2932,27 +4158,34 @@
             setStatus('Sin internet para cargar el detalle.', 'warn');
             return;
         }
-        limpiarPreviewChips();
-        setResumenVisible(true);
-        setChipsPanelCollapsed(false, false);
-        setPreviewLoading(true, 'Cargando datos…');
-        setStatus('');
-        if (elStatus) elStatus.hidden = true;
-        try {
-            const r = await withMinLoader(() => callbackJsonp({
-                fecha: fechaIso,
-                ensayo_numero: ensayoNumero
-            }));
+        if (!sinOverlay) {
+            limpiarPreviewChips();
+            setResumenVisible(true);
+            setChipsPanelCollapsed(false, false);
+            setPreviewLoading(true, 'Cargando datos…');
+            setStatus('');
+            if (elStatus) elStatus.hidden = true;
+        }
+            const r = await (sinOverlay
+                ? callbackJsonp({ fecha: fechaIso, ensayo_numero: ensayoNumero })
+                : withMinLoader(() => callbackJsonp({
+                    fecha: fechaIso,
+                    ensayo_numero: ensayoNumero
+                })));
             if (!r || r.ok !== true || !r.data) {
                 throw new Error(r?.error || 'Registro no encontrado');
             }
             lastDetallePacking = r.data;
             pintarPreview(r.data);
         } catch (err) {
-            setStatus(String(err.message || err), 'error');
-            limpiarPreview();
+            if (!sinOverlay) {
+                setStatus(String(err.message || err), 'error');
+                limpiarPreview();
+            }
         } finally {
-            setPreviewLoading(false);
+            packingOmitirAutoguardado = false;
+            if (!sinOverlay) setPreviewLoading(false);
+            guardarBorradorMuestraActivaInmediato_();
         }
     }
 
@@ -3123,11 +4356,18 @@
     });
 
     elMuestra?.addEventListener('change', () => {
+        packingBadgeWasComplete = false;
         const fecha = elFecha?.value || '';
         const raw = elMuestra?.value || '';
         const prev = packingMuestraAnterior;
-        if (!packingRestaurandoBorrador && prev && prev !== raw) {
-            snapshotMuestraPackingSiHayTrabajo(fecha, prev);
+        const estadoPrev = (!packingRestaurandoBorrador && prev && prev !== raw)
+            ? capturarEstadoMuestraPacking()
+            : null;
+
+        cancelarGuardadoBorradorProgramadoPacking_();
+
+        if (estadoPrev) {
+            snapshotMuestraPackingSiHayTrabajo(fecha, prev, estadoPrev);
         }
         packingMuestraAnterior = raw;
         if (!raw) {
@@ -3150,8 +4390,158 @@
         guardarBorradorMuestraActiva();
     });
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') guardarBorradorMuestraActiva();
+        if (document.visibilityState === 'hidden') {
+            guardarBorradorMuestraActiva();
+            return;
+        }
+        if (!puedeRefrescarFechaPacking_()) return;
+        if (aplicarFechaHoyPacking_({ forzar: true }) && elFecha?.value) {
+            void cargarMuestrasPorFecha(elFecha.value);
+        }
     });
+
+    function fechaDisplayDdMmYyyyPacking(iso) {
+        const p = String(iso || hoyIsoLocal()).split('-');
+        if (p.length !== 3) return String(iso || '');
+        return `${p[2]}-${p[1]}-${p[0]}`;
+    }
+
+    function formatoHoraPdfPacking(hora) {
+        const s = String(hora || '').trim();
+        if (!s || !s.includes(':')) return s;
+        const [h, m] = s.split(':');
+        const hh = Number(h);
+        if (Number.isNaN(hh)) return s;
+        return `${hh}:${String(m || '00').padStart(2, '0')}`;
+    }
+
+    function valorPesoPdfPacking(v) {
+        const n = pesoNumero(v);
+        return n > 0 ? String(n) : '';
+    }
+
+    function calcDeficitPresionPdfPacking(amb, fruta) {
+        const a = parseFloat(String(amb || '').replace(',', '.'));
+        const f = parseFloat(String(fruta || '').replace(',', '.'));
+        if (!Number.isFinite(a) || !Number.isFinite(f)) return '';
+        return (f - a).toFixed(3);
+    }
+
+    function filaPdfVaciaPacking() {
+        return {
+            horaInicio: '', rotulo: '', etapa: '', campo: '', turno: '',
+            variedad: '', placa: '', guia: '', viaje: '',
+            tRecep: '', tIngGas: '', tSalGas: '', tIngPre: '', tSalPre: '',
+            pRecep: '', pIngGas: '', pSalGas: '', pIngPre: '', pSalPre: '',
+            tempAmb0: '', tempPulpa0: '', tempAmb1: '', tempPulpa1: '',
+            tempAmb2: '', tempPulpa2: '', tempAmb3: '', tempPulpa3: '',
+            tempAmb4: '', tempPulpa4: '',
+            hRecep: '', hIngGas: '', hSalGas: '', hIngPre: '', hSalPre: ''
+        };
+    }
+
+    function filaPdfDesdeCardPacking(card, metaBase, tiemposFmt, controlGlobal, incluirGlobal) {
+        if (!incluirGlobal) {
+            const p = card?.pesos || pesosVaciosPacking();
+            return {
+                ...filaPdfVaciaPacking(),
+                pRecep: valorPesoPdfPacking(p.recepcion),
+                pIngGas: valorPesoPdfPacking(p.ingresoGas),
+                pSalGas: valorPesoPdfPacking(p.salidaGas),
+                pIngPre: valorPesoPdfPacking(p.ingresoPre),
+                pSalPre: valorPesoPdfPacking(p.salidaPre)
+            };
+        }
+        const p = card?.pesos || pesosVaciosPacking();
+        const t = controlGlobal?.temperatura || packingControlState.temperatura;
+        const h = controlGlobal?.humedad || packingControlState.humedad;
+        const fila = {
+            ...metaBase,
+            tRecep: tiemposFmt[0] || '',
+            tIngGas: tiemposFmt[1] || '',
+            tSalGas: tiemposFmt[2] || '',
+            tIngPre: tiemposFmt[3] || '',
+            tSalPre: tiemposFmt[4] || '',
+            pRecep: valorPesoPdfPacking(p.recepcion),
+            pIngGas: valorPesoPdfPacking(p.ingresoGas),
+            pSalGas: valorPesoPdfPacking(p.salidaGas),
+            pIngPre: valorPesoPdfPacking(p.ingresoPre),
+            pSalPre: valorPesoPdfPacking(p.salidaPre),
+            hRecep: String(h[0] || '').trim(),
+            hIngGas: String(h[1] || '').trim(),
+            hSalGas: String(h[2] || '').trim(),
+            hIngPre: String(h[3] || '').trim(),
+            hSalPre: String(h[4] || '').trim()
+        };
+        for (let i = 0; i < 5; i++) {
+            fila[`tempAmb${i}`] = String(t.amb[i] || '').trim();
+            fila[`tempPulpa${i}`] = String(t.pulpa[i] || '').trim();
+        }
+        return fila;
+    }
+
+    window.obtenerDatosPdfPacking = function obtenerDatosPdfPacking() {
+        const sel = ensayoSeleccionado();
+        if (!sel.num_muestra || !sel.ensayo_numero) {
+            throw new Error('Selecciona una muestra antes de generar el PDF.');
+        }
+        recalcularPresionesPacking();
+        const d = lastDetallePacking || {};
+        const etapa = String(d.TRAZ_ETAPA ?? '').trim();
+        const campo = String(d.TRAZ_CAMPO ?? '').trim();
+        const turno = String(d.TRAZ_LIBRE ?? '').trim();
+        const traz = [etapa, campo, turno].filter(Boolean).join('-');
+        const tiemposFmt = getTiemposMuestra().map(formatoHoraPdfPacking);
+        const cards = packingCards.slice().sort((a, b) => Number(a.clamshellNum) - Number(b.clamshellNum));
+        const metaBase = {
+            horaInicio: formatoHoraPdfPacking(getHoraPersonal()),
+            rotulo: String(d.ENSAYO_NOMBRE ?? sel.ensayo_numero ?? '').trim(),
+            etapa,
+            campo,
+            turno,
+            variedad: String(d.VARIEDAD ?? '').trim(),
+            placa: String(d.PLACA_VEHICULO ?? '').trim().toUpperCase(),
+            guia: String(d.GUIA_REMISION ?? '').trim(),
+            viaje: String(d.N_VIAJE ?? d.n_viaje ?? '').trim()
+        };
+        const controlSnap = clonarControlStatePacking(packingControlState);
+        const maxRows = PACKING_PDF_FILAS;
+        const filas = [];
+        for (let r = 0; r < maxRows; r++) {
+            filas.push(filaPdfDesdeCardPacking(cards[r] || null, metaBase, tiemposFmt, controlSnap, r === 0));
+        }
+        const pa = packingControlState.presionAmb.slice();
+        const pf = packingControlState.presionFruta.slice();
+        const deficit = pa.map((a, i) => calcDeficitPresionPdfPacking(a, pf[i]));
+        const obsPartes = cards.map((c) => String(c.observacion || '').trim()).filter(Boolean);
+        const observacionesLista = Array.from({ length: PACKING_PDF_FILAS }, (_, i) => (
+            String(cards[i]?.observacion || '').trim()
+        ));
+        return {
+            ensayo: sel.ensayo_numero,
+            fecha: fechaDisplayDdMmYyyyPacking(getFechaInspeccionPacking()),
+            empresa: 'AGROVISION',
+            codigo: 'PE-F-OPH-309',
+            version: '1',
+            tituloHoja1: 'FORMATO MEDICIÓN DE TIEMPOS, TEMPERATURA Y PESOS EN RECEPCIÓN - ARÁNDANO - C5-C6-A9-LN',
+            tituloHoja2: 'FORMATO MEDICIÓN DE TIEMPOS, TEMPERATURA Y PESOS EN RECEPCIÓN - ARÁNDANO - CS-C6-A9-LN',
+            meta: {
+                fecha: fechaDisplayDdMmYyyyPacking(getFechaInspeccionPacking()),
+                trazabilidad: traz,
+                trazabilidadArchivo: traz,
+                responsable: getResponsablePacking(),
+                numMuestra: String(sel.num_muestra || '').trim()
+            },
+            filas,
+            pagina2: {
+                presionAmb: pa.map((v) => String(v || '').trim()),
+                presionFruta: pf.map((v) => String(v || '').trim()),
+                deficit,
+                observaciones: obsPartes.join(' · '),
+                observacionesLista
+            }
+        };
+    };
 
     window.PackingContext = {
         getHoraPersonal,
@@ -3216,6 +4606,13 @@
     if (elFecha?.value) void cargarMuestrasPorFecha(elFecha.value);
     void acotarFechaDesdePlanilla().then(() => {
         if (elFecha?.value) void cargarMuestrasPorFecha(elFecha.value);
+    });
+
+    window.addEventListener('pageshow', () => {
+        if (!puedeRefrescarFechaPacking_()) return;
+        if (aplicarFechaHoyPacking_({ forzar: true }) && elFecha?.value) {
+            void cargarMuestrasPorFecha(elFecha.value);
+        }
     });
 
     if (!navigator.onLine) {

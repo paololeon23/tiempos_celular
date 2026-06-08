@@ -426,12 +426,33 @@
     }
 
     let filtroParcelaSilencioso = false;
+    let refVariedadesPausado = false;
+    let catalogoAppCache = null;
+    let cacheOtrasVariedadesCat = null;
+    let cacheOtrasVariedadesLista = null;
+
+    function invalidarCacheCatalogoApp() {
+        catalogoAppCache = null;
+        cacheOtrasVariedadesCat = null;
+        cacheOtrasVariedadesLista = null;
+    }
+
+    function actualizarHabilitacionOtrasVariedades(habilitar) {
+        const det = document.getElementById('visual-variedades-referencia');
+        if (!det) return;
+        det.classList.toggle('is-disabled', !habilitar);
+        det.querySelectorAll('.meta-variedades-ref-pick').forEach((btn) => {
+            btn.disabled = !habilitar;
+        });
+        if (!habilitar) det.open = false;
+    }
 
     function aplicarFiltrosParcelaCampo() {
         if (filtroParcelaSilencioso) return;
         const fundoEl = document.getElementById('visual-meta-fundo');
         const etapaEl = document.getElementById('visual-traz-etapa');
         const campoEl = document.getElementById('visual-traz-campo');
+        const turnoEl = document.getElementById('visual-traz-turno');
         const varEl = document.getElementById('visual-meta-variedad');
         if (!fundoEl || !etapaEl || !campoEl) return;
 
@@ -447,15 +468,26 @@
         poblarSelectCampo(campoEl, fundo, etapa, campoPrev, catalogo);
         const campo = String(campoEl.value || '').trim();
 
+        etapaEl.disabled = !fundo;
+        campoEl.disabled = !fundo || !etapa;
+        if (turnoEl) turnoEl.disabled = !fundo || !etapa;
+
+        const variedadHabilitada = !!(fundo && etapa && campo);
         if (varEl) {
             const permitidas = listarVariedadesParaSeleccion(fundo, etapa, campo, catalogo);
-            const usarFiltro = conMapeo && fundo && etapa && campo;
+            const usarFiltro = conMapeo && variedadHabilitada;
             poblarSelectVariedad(varEl, varPrev, usarFiltro ? permitidas : null);
-            varEl.disabled = !fundo || (conMapeo ? (!etapa || !campo) : false);
+            varEl.disabled = !variedadHabilitada;
         }
+        actualizarHabilitacionOtrasVariedades(variedadHabilitada);
 
         if (typeof window.sincronizarTrazabilidadCompuesta === 'function') {
             window.sincronizarTrazabilidadCompuesta();
+        }
+        if (typeof window.programarActualizarErroresMetaFormulario === 'function') {
+            window.programarActualizarErroresMetaFormulario();
+        } else if (typeof window.actualizarErroresMetaFormulario === 'function') {
+            window.actualizarErroresMetaFormulario();
         }
     }
 
@@ -476,18 +508,23 @@
 
     /** Catálogo siempre desde localStorage o embebido en JS (sin red). */
     function obtenerCatalogoApp() {
+        if (catalogoAppCache) return catalogoAppCache;
         try {
             const raw = localStorage.getItem(CATALOGO_STORAGE_KEY);
             if (raw) {
                 const parsed = normalizarCatalogoApp(JSON.parse(raw));
-                if (parsed) return asegurarMapeoEnCatalogo(parsed);
+                if (parsed) {
+                    catalogoAppCache = asegurarMapeoEnCatalogo(parsed);
+                    return catalogoAppCache;
+                }
             }
         } catch (_) {
             try {
                 localStorage.removeItem(CATALOGO_STORAGE_KEY);
             } catch (e2) { /* ignore */ }
         }
-        return asegurarMapeoEnCatalogo(obtenerCatalogoDefectoNormalizado());
+        catalogoAppCache = asegurarMapeoEnCatalogo(obtenerCatalogoDefectoNormalizado());
+        return catalogoAppCache;
     }
 
     function sembrarCatalogoLocalSiVacio() {
@@ -503,6 +540,8 @@
         const norm = normalizarCatalogoApp(catalogo);
         if (!norm) throw new Error('JSON inválido: objeto raíz con "variedades" y/o "fundos".');
         localStorage.setItem(CATALOGO_STORAGE_KEY, JSON.stringify(norm));
+        invalidarCacheCatalogoApp();
+        catalogoAppCache = asegurarMapeoEnCatalogo(norm);
         window.dispatchEvent(new CustomEvent(CATALOGO_EVENT, { detail: norm }));
         return norm;
     }
@@ -511,6 +550,7 @@
         try {
             localStorage.removeItem(CATALOGO_STORAGE_KEY);
         } catch (_) { /* ignore */ }
+        invalidarCacheCatalogoApp();
         const def = clonarCatalogo(CATALOGO_APP_DEFAULT);
         window.dispatchEvent(new CustomEvent(CATALOGO_EVENT, { detail: def }));
         return def;
@@ -551,8 +591,14 @@
     /** Variedades del catálogo que no aparecen en ninguna parcela del mapeo. */
     function listarOtrasVariedadesReferencia(catalogo) {
         const cat = catalogo || obtenerCatalogoApp();
+        if (cacheOtrasVariedadesCat === cat && cacheOtrasVariedadesLista) {
+            return cacheOtrasVariedadesLista;
+        }
         const usadas = listarNombresVariedadesUsadasEnMapeo(cat);
-        return listarOpcionesVariedad(cat).filter((o) => !usadas.has(o.nombre));
+        const lista = listarOpcionesVariedad(cat).filter((o) => !usadas.has(o.nombre));
+        cacheOtrasVariedadesCat = cat;
+        cacheOtrasVariedadesLista = lista;
+        return lista;
     }
 
     function listarPermitidasVariedadActual(catalogo) {
@@ -590,9 +636,15 @@
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         sel.dispatchEvent(new Event('input', { bubbles: true }));
         actualizarBloqueOtrasVariedadesReferencia(catalogo);
+        if (typeof window.programarActualizarErroresMetaFormulario === 'function') {
+            window.programarActualizarErroresMetaFormulario();
+        } else if (typeof window.actualizarErroresMetaFormulario === 'function') {
+            window.actualizarErroresMetaFormulario();
+        }
     }
 
     function actualizarBloqueOtrasVariedadesReferencia(catalogo) {
+        if (refVariedadesPausado) return;
         const det = document.getElementById('visual-variedades-referencia');
         const lista = document.getElementById('visual-variedades-referencia-list');
         const badge = document.getElementById('visual-variedades-ref-count');
@@ -601,16 +653,27 @@
         const otras = listarOtrasVariedadesReferencia(cat);
         const selVal = String(document.getElementById('visual-meta-variedad')?.value || '').trim();
         if (badge) badge.textContent = '(' + otras.length + ')';
-        lista.innerHTML = otras.map((o) => {
-            const txt = escapeHtmlText(o.codigo + ' · ' + o.nombre);
-            const grp = escapeHtmlText(o.grupo);
+        const frag = document.createDocumentFragment();
+        otras.forEach((o) => {
+            const li = document.createElement('li');
             const activa = selVal && (o.nombre === selVal || resolverNombreVariedadCanonico(o.nombre, cat) === selVal);
-            return `<li class="${activa ? 'is-selected' : ''}">` +
-                `<button type="button" class="meta-variedades-ref-pick" data-variedad="${escapeHtmlAttr(o.nombre)}">` +
-                `<span class="meta-variedades-ref-cod">${txt}</span>` +
-                `<span class="meta-variedades-ref-grp">${grp}</span>` +
-                `</button></li>`;
-        }).join('');
+            if (activa) li.className = 'is-selected';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'meta-variedades-ref-pick';
+            btn.setAttribute('data-variedad', o.nombre);
+            const cod = document.createElement('span');
+            cod.className = 'meta-variedades-ref-cod';
+            cod.textContent = o.codigo + ' · ' + o.nombre;
+            const grp = document.createElement('span');
+            grp.className = 'meta-variedades-ref-grp';
+            grp.textContent = o.grupo;
+            btn.appendChild(cod);
+            btn.appendChild(grp);
+            li.appendChild(btn);
+            frag.appendChild(li);
+        });
+        lista.replaceChildren(frag);
     }
 
     function enlazarListaOtrasVariedades() {
@@ -676,7 +739,7 @@
 
         selectEl.innerHTML = html;
         if (actual) selectEl.value = actual;
-        actualizarBloqueOtrasVariedadesReferencia(catalogo);
+        if (!refVariedadesPausado) actualizarBloqueOtrasVariedadesReferencia(catalogo);
     }
 
     function escapeHtmlAttr(s) {
@@ -735,14 +798,18 @@
                 if (id === 'visual-meta-fundo') {
                     const et = document.getElementById('visual-traz-etapa');
                     const ca = document.getElementById('visual-traz-campo');
+                    const tu = document.getElementById('visual-traz-turno');
                     const va = document.getElementById('visual-meta-variedad');
                     if (et) et.value = '';
                     if (ca) ca.value = '';
+                    if (tu) tu.value = '';
                     if (va) va.value = '';
                 } else if (id === 'visual-traz-etapa') {
                     const ca = document.getElementById('visual-traz-campo');
+                    const tu = document.getElementById('visual-traz-turno');
                     const va = document.getElementById('visual-meta-variedad');
                     if (ca) ca.value = '';
+                    if (tu) tu.value = '';
                     if (va) va.value = '';
                 } else if (id === 'visual-traz-campo') {
                     const va = document.getElementById('visual-meta-variedad');
@@ -763,40 +830,75 @@
         actualizarBloqueOtrasVariedadesReferencia();
     }
 
-    /** Repuebla fundo/etapa/campo/variedad con opciones y valores guardados (p. ej. tras borrador). */
-    function aplicarParcelaCampoDesdeMeta(meta) {
-        if (!meta || typeof meta !== 'object') return;
+    function prepararContextoParcelaDesdeMeta(meta) {
+        if (!meta || typeof meta !== 'object') return null;
         sembrarCatalogoLocalSiVacio();
         const catalogo = obtenerCatalogoApp();
-        const fundo = String(meta['visual-meta-fundo'] || meta['meta-fundo'] || '').trim();
-        const etapa = String(meta['visual-traz-etapa'] || meta['meta-traz-etapa'] || '').trim();
-        const campo = String(meta['visual-traz-campo'] || meta['meta-traz-campo'] || '').trim();
-        const variedad = String(meta['visual-meta-variedad'] || meta['meta-variedad'] || '').trim();
-        const turno = String(meta['visual-traz-turno'] || meta['meta-traz-turno'] || '').trim();
+        return {
+            catalogo,
+            fundo: String(meta['visual-meta-fundo'] || meta['meta-fundo'] || '').trim(),
+            etapa: String(meta['visual-traz-etapa'] || meta['meta-traz-etapa'] || '').trim(),
+            campo: String(meta['visual-traz-campo'] || meta['meta-traz-campo'] || '').trim(),
+            variedad: String(meta['visual-meta-variedad'] || meta['meta-variedad'] || '').trim(),
+            turno: String(meta['visual-traz-turno'] || meta['meta-traz-turno'] || '').trim(),
+            fundoEl: document.getElementById('visual-meta-fundo'),
+            etapaEl: document.getElementById('visual-traz-etapa'),
+            campoEl: document.getElementById('visual-traz-campo'),
+            varEl: document.getElementById('visual-meta-variedad'),
+            turnoEl: document.getElementById('visual-traz-turno')
+        };
+    }
 
-        const fundoEl = document.getElementById('visual-meta-fundo');
-        const etapaEl = document.getElementById('visual-traz-etapa');
-        const campoEl = document.getElementById('visual-traz-campo');
-        const varEl = document.getElementById('visual-meta-variedad');
-        const turnoEl = document.getElementById('visual-traz-turno');
-
-        if (fundoEl) poblarSelectFundo(fundoEl, fundo);
-        const fundoOk = String(fundoEl?.value || '').trim() || fundo;
-        if (etapaEl) poblarSelectEtapa(etapaEl, fundoOk, etapa, catalogo);
-        const etapaOk = String(etapaEl?.value || '').trim() || etapa;
-        if (campoEl) poblarSelectCampo(campoEl, fundoOk, etapaOk, campo, catalogo);
-        const campoOk = String(campoEl?.value || '').trim() || campo;
-
-        if (varEl) {
-            const permitidas = listarVariedadesParaSeleccion(fundoOk, etapaOk, campoOk, catalogo);
-            const usarFiltro = fundoTieneMapeo(fundoOk, catalogo) && fundoOk && etapaOk && campoOk;
-            poblarSelectVariedad(varEl, variedad, usarFiltro ? permitidas : null);
+    /** Pasos ligeros para arranque diferido (un select por tick). */
+    function pasosAplicarParcelaCampoDesdeMeta(meta) {
+        const ctx = prepararContextoParcelaDesdeMeta(meta);
+        if (!ctx) return [];
+        const state = {
+            fundoOk: ctx.fundo,
+            etapaOk: ctx.etapa,
+            campoOk: ctx.campo
+        };
+        const pasos = [];
+        if (ctx.fundoEl) {
+            pasos.push(() => {
+                poblarSelectFundo(ctx.fundoEl, ctx.fundo);
+                state.fundoOk = String(ctx.fundoEl.value || '').trim() || ctx.fundo;
+            });
         }
-        if (turnoEl && turno) turnoEl.value = turno;
-
-        if (typeof window.sincronizarTrazabilidadCompuesta === 'function') {
-            window.sincronizarTrazabilidadCompuesta();
+        if (ctx.etapaEl) {
+            pasos.push(() => {
+                poblarSelectEtapa(ctx.etapaEl, state.fundoOk, ctx.etapa, ctx.catalogo);
+                state.etapaOk = String(ctx.etapaEl.value || '').trim() || ctx.etapa;
+            });
         }
+        if (ctx.campoEl) {
+            pasos.push(() => {
+                poblarSelectCampo(ctx.campoEl, state.fundoOk, state.etapaOk, ctx.campo, ctx.catalogo);
+                state.campoOk = String(ctx.campoEl.value || '').trim() || ctx.campo;
+            });
+        }
+        if (ctx.varEl) {
+            pasos.push(() => {
+                const permitidas = listarVariedadesParaSeleccion(
+                    state.fundoOk, state.etapaOk, state.campoOk, ctx.catalogo
+                );
+                const usarFiltro = fundoTieneMapeo(state.fundoOk, ctx.catalogo)
+                    && state.fundoOk && state.etapaOk && state.campoOk;
+                poblarSelectVariedad(ctx.varEl, ctx.variedad, usarFiltro ? permitidas : null);
+            });
+        }
+        pasos.push(() => {
+            if (ctx.turnoEl && ctx.turno) ctx.turnoEl.value = ctx.turno;
+            if (typeof window.sincronizarTrazabilidadCompuesta === 'function') {
+                window.sincronizarTrazabilidadCompuesta();
+            }
+        });
+        return pasos;
+    }
+
+    /** Repuebla fundo/etapa/campo/variedad con opciones y valores guardados (p. ej. tras borrador). */
+    function aplicarParcelaCampoDesdeMeta(meta) {
+        pasosAplicarParcelaCampoDesdeMeta(meta).forEach((fn) => fn());
     }
 
     function enlazarCatalogoOfflineOnline() {
@@ -815,29 +917,36 @@
         });
     }
 
-    function initCatalogoSelectsCampo() {
-        sembrarCatalogoLocalSiVacio();
-        const selVar = document.getElementById('visual-meta-variedad');
-        const selFun = document.getElementById('visual-meta-fundo');
-        const selEta = document.getElementById('visual-traz-etapa');
-        const selCam = document.getElementById('visual-traz-campo');
-
-        if (selFun) poblarSelectFundo(selFun);
-        if (selEta) poblarSelectEtapa(selEta, selFun?.value, selEta.value);
-        if (selCam) poblarSelectCampo(selCam, selFun?.value, selEta?.value, selCam.value);
-        if (selVar) poblarSelectVariedad(selVar);
-
-        enlazarFiltrosParcelaCampo();
-        enlazarListaOtrasVariedades();
-        enlazarCatalogoOfflineOnline();
-        const selVarChange = document.getElementById('visual-meta-variedad');
-        if (selVarChange && selVarChange.dataset.variedadRefSync !== '1') {
-            selVarChange.dataset.variedadRefSync = '1';
-            selVarChange.addEventListener('change', () => actualizarBloqueOtrasVariedadesReferencia());
+    function initCatalogoSelectsCampo(opts) {
+        if (window.__tiemposCatalogoCampoInited === '1' && !opts?.forzar) {
+            aplicarFiltrosParcelaCampo();
+            return;
         }
-        aplicarFiltrosParcelaCampo();
+        const pausarRef = opts?.pausarRef !== false;
+        if (pausarRef) refVariedadesPausado = true;
+        try {
+            sembrarCatalogoLocalSiVacio();
+            obtenerCatalogoApp();
+            const selFun = document.getElementById('visual-meta-fundo');
+            if (selFun) poblarSelectFundo(selFun);
+            enlazarFiltrosParcelaCampo();
+            enlazarListaOtrasVariedades();
+            enlazarCatalogoOfflineOnline();
+            const selVarChange = document.getElementById('visual-meta-variedad');
+            if (selVarChange && selVarChange.dataset.variedadRefSync !== '1') {
+                selVarChange.dataset.variedadRefSync = '1';
+                selVarChange.addEventListener('change', () => actualizarBloqueOtrasVariedadesReferencia());
+            }
+            if (!opts?.sinAplicarFiltros) aplicarFiltrosParcelaCampo();
+            window.__tiemposCatalogoCampoInited = '1';
+        } finally {
+            if (pausarRef) refVariedadesPausado = false;
+        }
 
+        if (window.__tiemposCatalogoEventBound === '1') return;
+        window.__tiemposCatalogoEventBound = '1';
         window.addEventListener(CATALOGO_EVENT, () => {
+            invalidarCacheCatalogoApp();
             refrescarSelectsCatalogoCampo();
             if (typeof window.actualizarBloqueoTrazabilidadPorFundo === 'function') {
                 window.actualizarBloqueoTrazabilidadPorFundo();
@@ -860,14 +969,12 @@
     window.aplicarFiltrosParcelaCampo = aplicarFiltrosParcelaCampo;
     window.refrescarSelectsCatalogoCampo = refrescarSelectsCatalogoCampo;
     window.aplicarParcelaCampoDesdeMeta = aplicarParcelaCampoDesdeMeta;
+    window.pasosAplicarParcelaCampoDesdeMeta = pasosAplicarParcelaCampoDesdeMeta;
     window.aplicarVariedadElegida = aplicarVariedadElegida;
     window.filtroParcelaSilencioso = (on) => { filtroParcelaSilencioso = !!on; };
+    window.pausarRefVariedadesCampo = (on) => { refVariedadesPausado = !!on; };
+    window.actualizarBloqueOtrasVariedadesReferencia = actualizarBloqueOtrasVariedadesReferencia;
+    window.invalidarCacheCatalogoApp = invalidarCacheCatalogoApp;
     window.initSelectVariedadCampo = initCatalogoSelectsCampo;
     window.initCatalogoSelectsCampo = initCatalogoSelectsCampo;
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initCatalogoSelectsCampo);
-    } else {
-        setTimeout(initCatalogoSelectsCampo, 0);
-    }
 }());
